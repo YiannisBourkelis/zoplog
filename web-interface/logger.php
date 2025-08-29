@@ -1,0 +1,225 @@
+<?php
+// index.php
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Network Logs Viewer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* New row highlighting */
+    .new-row {
+      background-color: #d1fae5; /* light green */
+      transition: background-color 3s ease;
+    }
+  </style>
+</head>
+<body class="bg-gray-100 text-gray-900">
+  <div class="container mx-auto py-6">
+
+    <h1 class="text-2xl font-bold mb-4">Network Logs Viewer</h1>
+
+    <!-- Controls -->
+    <div class="flex flex-wrap gap-4 items-center mb-4">
+      <label class="flex items-center gap-2">
+        Auto-refresh:
+        <select id="refresh-interval" class="border rounded px-2 py-1">
+          <option value="0">Disabled</option>
+          <option value="1000">1s</option>
+          <option value="5000">5s</option>
+          <option value="10000">10s</option>
+          <option value="30000">30s</option>
+        </select>
+      </label>
+
+      <input id="filter-ip" type="text" placeholder="Filter by IP" class="border rounded px-2 py-1">
+      <input id="filter-mac" type="text" placeholder="Filter by MAC" class="border rounded px-2 py-1">
+      <input id="filter-hostname" type="text" placeholder="Filter by Hostname" class="border rounded px-2 py-1">
+
+      <select id="filter-method" class="border rounded px-2 py-1">
+        <option value="">Any Method</option>
+        <option value="GET">GET</option>
+        <option value="POST">POST</option>
+        <option value="PUT">PUT</option>
+        <option value="DELETE">DELETE</option>
+        <option value="HEAD">HEAD</option>
+        <option value="OPTIONS">OPTIONS</option>
+        <option value="PATCH">PATCH</option>
+        <option value="TLS_CLIENTHELLO">TLS_CLIENTHELLO</option>
+        <option value="N/A">N/A</option>
+      </select>
+
+      <select id="filter-type" class="border rounded px-2 py-1">
+        <option value="">Any Type</option>
+        <option value="HTTP">HTTP</option>
+        <option value="HTTPS">HTTPS</option>
+      </select>
+
+      <button id="apply-filters" class="bg-blue-500 text-white px-3 py-1 rounded">Apply Filters</button>
+    </div>
+
+    <!-- Logs table -->
+    <div class="overflow-x-auto bg-white shadow rounded-lg">
+      <table class="min-w-full text-sm text-left">
+        <thead class="bg-gray-200">
+          <tr>
+            <th class="px-4 py-2">Time</th>
+            <th class="px-4 py-2">Src IP</th>
+            <th class="px-4 py-2">Src MAC</th>
+            <th class="px-4 py-2">Dst IP</th>
+            <th class="px-4 py-2">Dst MAC</th>
+            <th class="px-4 py-2">Type</th>
+            <th class="px-4 py-2">Method</th>
+            <th class="px-4 py-2">Host</th>
+            <th class="px-4 py-2">Path</th>
+          </tr>
+        </thead>
+        <tbody id="logs-body"></tbody>
+      </table>
+    </div>
+
+    <!-- Loading indicator -->
+    <div id="loading" class="text-center py-4 hidden">Loading...</div>
+
+  </div>
+
+  <!-- Floating "new logs" banner -->
+  <div id="new-logs-banner" 
+       class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-4 py-2 rounded shadow-lg cursor-pointer">
+    🔄 New logs available – click to view
+  </div>
+
+<script>
+let offset = 0;
+let autoRefreshTimer = null;
+let latestTimestamp = null;
+let filters = { ip: "", mac: "", hostname: "", method: "", type: "" };
+let userAtTop = true;
+
+function renderRow(row) {
+  return `
+    <td class="px-4 py-2">${row.packet_timestamp}</td>
+    <td class="px-4 py-2">${row.src_ip}:${row.src_port}</td>
+    <td class="px-4 py-2">${row.src_mac || ""}</td>
+    <td class="px-4 py-2">${row.dst_ip}:${row.dst_port}</td>
+    <td class="px-4 py-2">${row.dst_mac || ""}</td>
+    <td class="px-4 py-2">${row.type}</td>
+    <td class="px-4 py-2">${row.method}</td>
+    <td class="px-4 py-2">${row.hostname || ""}</td>
+    <td class="px-4 py-2">${row.path || ""}</td>
+  `;
+}
+
+async function fetchLogs(reset=false, prepend=false) {
+  const tbody = document.getElementById("logs-body");
+  document.getElementById("loading").classList.remove("hidden");
+
+  const params = new URLSearchParams({
+    offset: reset ? 0 : offset,
+    limit: 200,
+    ip: filters.ip,
+    mac: filters.mac,
+    hostname: filters.hostname,
+    method: filters.method,
+    type: filters.type
+  });
+
+  if (prepend && latestTimestamp) {
+    params.append("since", latestTimestamp);
+  }
+
+  try {
+    const res = await fetch("fetch_logs.php?" + params.toString());
+    const data = await res.json();
+
+    if (prepend) {
+      if (data.length > 0) {
+        latestTimestamp = data[data.length - 1].packet_timestamp;
+        const fragment = document.createDocumentFragment();
+
+        data.forEach(row => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = renderRow(row);
+          tr.classList.add("new-row");
+          fragment.appendChild(tr);
+          setTimeout(() => tr.classList.remove("new-row"), 3000);
+        });
+
+        tbody.insertBefore(fragment, tbody.firstChild);
+
+        if (!userAtTop) {
+          document.getElementById("new-logs-banner").classList.remove("hidden");
+        } else {
+          tbody.parentElement.scrollTop = 0;
+        }
+      }
+    } else {
+      if (reset) {
+        tbody.innerHTML = "";
+        offset = 0;
+      }
+
+      const fragment = document.createDocumentFragment();
+      data.forEach(row => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = renderRow(row);
+        fragment.appendChild(tr);
+      });
+      tbody.appendChild(fragment);
+
+      if (data.length > 0) {
+        latestTimestamp = data[0].packet_timestamp;
+      }
+
+      offset += data.length;
+    }
+  } catch (e) {
+    console.error("Fetch failed:", e);
+  } finally {
+    document.getElementById("loading").classList.add("hidden");
+  }
+}
+
+// Infinite scroll
+window.addEventListener("scroll", () => {
+  if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 100) {
+    fetchLogs();
+  }
+
+  userAtTop = window.scrollY < 50;
+  if (userAtTop) document.getElementById("new-logs-banner").classList.add("hidden");
+});
+
+// Auto refresh
+document.getElementById("refresh-interval").addEventListener("change", e => {
+  clearInterval(autoRefreshTimer);
+  const interval = parseInt(e.target.value);
+  if (interval > 0) {
+    autoRefreshTimer = setInterval(() => fetchLogs(false, true), interval);
+  }
+});
+
+// Filters
+document.getElementById("apply-filters").addEventListener("click", () => {
+  filters.ip = document.getElementById("filter-ip").value;
+  filters.mac = document.getElementById("filter-mac").value;
+  filters.hostname = document.getElementById("filter-hostname").value;
+  filters.method = document.getElementById("filter-method").value;
+  filters.type = document.getElementById("filter-type").value;
+  latestTimestamp = null;
+  fetchLogs(true);
+});
+
+// Banner click → jump to top
+document.getElementById("new-logs-banner").addEventListener("click", () => {
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  document.getElementById("new-logs-banner").classList.add("hidden");
+});
+
+// Initial load
+fetchLogs(true);
+</script>
+
+</body>
+</html>
