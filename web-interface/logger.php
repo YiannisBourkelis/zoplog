@@ -1,5 +1,5 @@
 <?php
-// index.php
+// logger.php
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -16,9 +16,17 @@
   </style>
 </head>
 <body class="bg-gray-100 text-gray-900">
+  <?php include "menu.php"; ?>
   <div class="container mx-auto py-6">
-
-    <h1 class="text-2xl font-bold mb-4">Network Logs Viewer</h1>
+    <div class="flex items-center space-x-3 mb-4">
+      <!-- Logger icon -->
+      <span>
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-6a2 2 0 012-2h2a2 2 0 012 2v6m-6 0h6"/>
+        </svg>
+      </span>
+      <h1 class="text-2xl font-bold">Network Logs Viewer</h1>
+    </div>
 
     <!-- Controls -->
     <div class="flex flex-wrap gap-4 items-center mb-4">
@@ -192,13 +200,28 @@ window.addEventListener("scroll", () => {
 });
 
 // Auto refresh
-document.getElementById("refresh-interval").addEventListener("change", e => {
+const refreshSelect = document.getElementById("refresh-interval");
+
+// Load saved interval from localStorage
+const savedInterval = localStorage.getItem("refresh-interval");
+if (savedInterval !== null) {
+  refreshSelect.value = savedInterval;
+}
+
+// Listen for changes and save to localStorage
+refreshSelect.addEventListener("change", e => {
   clearInterval(autoRefreshTimer);
   const interval = parseInt(e.target.value);
+  localStorage.setItem("refresh-interval", e.target.value);
   if (interval > 0) {
     autoRefreshTimer = setInterval(() => fetchLogs(false, true), interval);
   }
 });
+
+// If interval was set, start auto-refresh
+if (savedInterval && parseInt(savedInterval) > 0) {
+  autoRefreshTimer = setInterval(() => fetchLogs(false, true), parseInt(savedInterval));
+}
 
 // Filters
 document.getElementById("apply-filters").addEventListener("click", () => {

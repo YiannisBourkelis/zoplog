@@ -134,7 +134,8 @@ $langs = array_slice($langs, 0, 10, true);
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body class="bg-gray-100 text-gray-900">
-  <div class="container mx-auto py-6">
+  <?php include "menu.php"; ?>
+<div class="container mx-auto py-6">
     <h1 class="text-3xl font-bold mb-6">📊 Network Dashboard</h1>
 
     <!-- Summary cards -->
