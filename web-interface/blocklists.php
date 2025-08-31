@@ -37,10 +37,18 @@
           <select class="w-full border rounded px-3 py-2">
             <option value="adware">Adware</option>
             <option value="malware">Malware</option>
+            <option value="phishing">Phishing</option>
+            <option value="cryptomining">Cryptomining</option>
+            <option value="tracking">Tracking</option>
+            <option value="scam">Scam</option>
             <option value="fakenews">Fake News</option>
             <option value="gambling">Gambling</option>
             <option value="social">Social</option>
             <option value="porn">Porn</option>
+            <option value="streaming">Streaming</option>
+            <option value="proxyvpn">Proxy/VPN</option>
+            <option value="shopping">Shopping</option>
+            <option value="hate">Hate/Violence</option>
           </select>
         </div>
         <div class="md:col-span-2 flex justify-end">
