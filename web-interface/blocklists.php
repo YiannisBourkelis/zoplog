@@ -49,6 +49,7 @@
             <option value="proxyvpn">Proxy/VPN</option>
             <option value="shopping">Shopping</option>
             <option value="hate">Hate/Violence</option>
+            <option value="other">Other</option>
           </select>
         </div>
         <div class="md:col-span-2 flex justify-end">
@@ -70,12 +71,12 @@
     <!-- Blocklist Cards -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
       <!-- Example Card 1 -->
-      <div class="bg-white rounded-lg shadow p-5 flex flex-col relative group">
-        <a href="blocklist_view.php?list=easylist" class="absolute inset-0 z-0"></a>
+      <div class="bg-white rounded-lg shadow p-5 flex flex-col relative group cursor-pointer hover:ring-2 hover:ring-red-400 transition"
+           onclick="window.location='blocklist_view.php?list=easylist'">
         <div class="flex items-center justify-between mb-2 relative z-10">
           <span class="text-xs bg-red-100 text-red-700 px-2 py-1 rounded">Adware</span>
           <!-- Toggle Active/Inactive Top Right -->
-          <button type="button" class="toggle-btn flex items-center px-2 py-1 rounded-full transition-colors bg-green-100 text-green-700 active ml-auto" data-list="easylist">
+          <button type="button" class="toggle-btn flex items-center px-2 py-1 rounded-full transition-colors bg-green-100 text-green-700 active ml-auto" data-list="easylist" tabindex="0">
             <span class="font-semibold text-xs mr-2">Active</span>
             <span class="w-6 h-6 flex items-center justify-center">
               <span class="inline-block w-4 h-4 bg-green-500 rounded-full"></span>
@@ -90,7 +91,7 @@
         </div>
         <!-- Card actions bottom row -->
         <div class="flex items-center justify-end mt-4 relative z-10">
-          <button class="delete-btn text-red-500 hover:text-red-700 px-2 py-1 rounded transition hover:bg-red-100 flex items-center" title="Delete" data-list="easylist">
+          <button class="delete-btn text-red-500 hover:text-red-700 px-2 py-1 rounded transition hover:bg-red-100 flex items-center" title="Delete" data-list="easylist" tabindex="0">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
             </svg>
@@ -99,11 +100,11 @@
         </div>
       </div>
       <!-- Example Card 2 -->
-      <div class="bg-white rounded-lg shadow p-5 flex flex-col relative group">
-        <a href="blocklist_view.php?list=socialblock" class="absolute inset-0 z-0"></a>
+      <div class="bg-white rounded-lg shadow p-5 flex flex-col relative group cursor-pointer hover:ring-2 hover:ring-blue-400 transition"
+           onclick="window.location='blocklist_view.php?list=socialblock'">
         <div class="flex items-center justify-between mb-2 relative z-10">
           <span class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">Social</span>
-          <button type="button" class="toggle-btn flex items-center px-2 py-1 rounded-full transition-colors bg-gray-100 text-gray-700 inactive ml-auto" data-list="socialblock">
+          <button type="button" class="toggle-btn flex items-center px-2 py-1 rounded-full transition-colors bg-gray-100 text-gray-700 inactive ml-auto" data-list="socialblock" tabindex="0">
             <span class="font-semibold text-xs mr-2">Inactive</span>
             <span class="w-6 h-6 flex items-center justify-center">
               <span class="inline-block w-4 h-4 bg-gray-400 rounded-full"></span>
@@ -117,7 +118,7 @@
           <span>Last Updated: 2024-08-29</span>
         </div>
         <div class="flex items-center justify-end mt-4 relative z-10">
-          <button class="delete-btn text-red-500 hover:text-red-700 px-2 py-1 rounded transition hover:bg-red-100 flex items-center" title="Delete" data-list="socialblock">
+          <button class="delete-btn text-red-500 hover:text-red-700 px-2 py-1 rounded transition hover:bg-red-100 flex items-center" title="Delete" data-list="socialblock" tabindex="0">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
             </svg>
@@ -126,11 +127,11 @@
         </div>
       </div>
       <!-- Example Card 3 -->
-      <div class="bg-white rounded-lg shadow p-5 flex flex-col relative group">
-        <a href="blocklist_view.php?list=pornblock" class="absolute inset-0 z-0"></a>
+      <div class="bg-white rounded-lg shadow p-5 flex flex-col relative group cursor-pointer hover:ring-2 hover:ring-purple-400 transition"
+           onclick="window.location='blocklist_view.php?list=pornblock'">
         <div class="flex items-center justify-between mb-2 relative z-10">
           <span class="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded">Porn</span>
-          <button type="button" class="toggle-btn flex items-center px-2 py-1 rounded-full transition-colors bg-green-100 text-green-700 active ml-auto" data-list="pornblock">
+          <button type="button" class="toggle-btn flex items-center px-2 py-1 rounded-full transition-colors bg-green-100 text-green-700 active ml-auto" data-list="pornblock" tabindex="0">
             <span class="font-semibold text-xs mr-2">Active</span>
             <span class="w-6 h-6 flex items-center justify-center">
               <span class="inline-block w-4 h-4 bg-green-500 rounded-full"></span>
@@ -144,7 +145,7 @@
           <span>Last Updated: 2024-08-28</span>
         </div>
         <div class="flex items-center justify-end mt-4 relative z-10">
-          <button class="delete-btn text-red-500 hover:text-red-700 px-2 py-1 rounded transition hover:bg-red-100 flex items-center" title="Delete" data-list="pornblock">
+          <button class="delete-btn text-red-500 hover:text-red-700 px-2 py-1 rounded transition hover:bg-red-100 flex items-center" title="Delete" data-list="pornblock" tabindex="0">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
             </svg>
