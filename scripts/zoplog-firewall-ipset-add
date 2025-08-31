@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 2 ]]; then
+  echo "usage: $0 <blocklist_id> <ip>" >&2
+  exit 2
+fi
+
+id="$1"
+ip="$2"
+
+if ! [[ "$id" =~ ^[0-9]+$ ]]; then
+  echo "invalid id: $id" >&2
+  exit 2
+fi
+
+setname="blacklist${id}"
+
+# Add IP to the set; -exist makes it idempotent
+ipset add "$setname" "$ip" -exist

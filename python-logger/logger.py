@@ -6,6 +6,7 @@ from scapy.packet import bind_layers
 from scapy.layers.inet import TCP
 from datetime import datetime
 from config import DB_CONFIG
+import subprocess
 
 # --- DB driver fallback (mysql-connector or PyMySQL) ---
 try:
@@ -74,6 +75,83 @@ def insert_packet_log(packet_timestamp, src_ip, src_port, dst_ip, dst_port,
         else:
             raise
 
+# --- Blocklist matching & firewall helper ---
+def _normalize_hostname(host: str) -> str:
+    if not host:
+        return ""
+    # Strip port if present (Host header may include it)
+    host = host.strip()
+    if ':' in host:
+        host = host.split(':', 1)[0]
+    # Lowercase and remove trailing dot
+    return host.lower().rstrip('.')
+
+
+def find_matching_blocklists_for_host(host: str):
+    """Return blocklist IDs where active blocklists contain an exact match of `host`."""
+    global conn
+    h = _normalize_hostname(host)
+    if not h:
+        return []
+    try:
+        cur = conn.cursor()
+        query = (
+            "SELECT DISTINCT bd.blocklist_id "
+            "FROM blocklist_domains bd "
+            "JOIN blocklists bl ON bl.id = bd.blocklist_id "
+            "WHERE bl.active = 'active' AND bd.domain = %s"
+        )
+        cur.execute(query, (h,))
+        rows = cur.fetchall()
+        return [row[0] for row in rows]
+    except mariadb.Error as e:
+        # Attempt a single reconnect on connection loss
+        if "MySQL server has gone away" in str(e):
+            try:
+                conn = mariadb.connect(**DB_CONFIG)
+                cur = conn.cursor()
+                query = (
+                    "SELECT DISTINCT bd.blocklist_id "
+                    "FROM blocklist_domains bd "
+                    "JOIN blocklists bl ON bl.id = bd.blocklist_id "
+                    "WHERE bl.active = 'active' AND bd.domain = %s"
+                )
+                cur.execute(query, (h,))
+                rows = cur.fetchall()
+                return [row[0] for row in rows]
+            except Exception as e2:
+                print(f"Blocklist lookup failed after reconnect: {e2}")
+                return []
+        else:
+            print(f"Blocklist lookup error: {e}")
+            return []
+    except Exception as e:
+        print(f"Blocklist lookup unexpected error: {e}")
+        return []
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+
+
+def ipset_add_ip(blocklist_id: int, ip: str):
+    """Call privileged helper to add ip to ipset 'blacklist{blocklist_id}'."""
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", "/usr/local/sbin/zoplog-firewall-ipset-add", str(blocklist_id), ip],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if result.returncode != 0:
+            err = (result.stderr or '').strip()
+            print(f"ipset add failed rc={result.returncode} id={blocklist_id} ip={ip} {err}")
+    except subprocess.TimeoutExpired:
+        print(f"ipset add timed out id={blocklist_id} ip={ip}")
+    except Exception as e:
+        print(f"ipset add error id={blocklist_id} ip={ip} err={e}")
+
 # --- Packet logging ---
 def log_http_request(packet):
     ts = datetime.fromtimestamp(float(packet.time)).strftime('%Y-%m-%d %H:%M:%S')
@@ -94,22 +172,106 @@ def log_http_request(packet):
                       src_mac, dst_mac,
                       method, host, path, user_agent, accept_language, "HTTP")
 
+    # If host matches any active blocklist, add destination IP to corresponding ipset(s)
+    try:
+        if host and dst_ip:
+            for bl_id in find_matching_blocklists_for_host(host):
+                ipset_add_ip(bl_id, dst_ip)
+    except Exception as e:
+        print(f"error during ipset add for HTTP host={host} ip={dst_ip}: {e}")
+
 def extract_tls_sni(packet):
+    """Parse TLS ClientHello to extract SNI hostname cleanly."""
     try:
         if not packet.haslayer(scapy.TCP) or not packet.haslayer(scapy.Raw):
             return None
-        payload = packet[scapy.Raw].load
-        if payload[0] != 0x16:  # TLS Handshake
+        data = bytes(packet[scapy.Raw].load)
+        # TLS record header: 5 bytes
+        if len(data) < 5 or data[0] != 0x16:  # ContentType 22 = handshake
             return None
-        if payload[5] != 0x01:  # ClientHello
+        # Record length (not strictly needed for this quick parse)
+        # rec_len = int.from_bytes(data[3:5], 'big')
+        # Handshake must be ClientHello
+        if len(data) < 6 or data[5] != 0x01:
             return None
-        sni_marker = b"\x00\x00"
-        start = payload.find(sni_marker)
-        if start == -1:
+
+        idx = 5
+        if len(data) < 9:
             return None
-        server_name_len = payload[start+5]
-        hostname = payload[start+6:start+6+server_name_len].decode(errors="ignore")
-        return hostname
+        hs_len = int.from_bytes(data[6:9], 'big')  # noqa: F841
+        idx = 9
+
+        # Client version (2) + Random (32)
+        if len(data) < idx + 2 + 32:
+            return None
+        idx += 2 + 32
+
+        # Session ID
+        if len(data) < idx + 1:
+            return None
+        sid_len = data[idx]
+        idx += 1
+        if len(data) < idx + sid_len:
+            return None
+        idx += sid_len
+
+        # Cipher Suites
+        if len(data) < idx + 2:
+            return None
+        cs_len = int.from_bytes(data[idx:idx+2], 'big')
+        idx += 2
+        if len(data) < idx + cs_len:
+            return None
+        idx += cs_len
+
+        # Compression Methods
+        if len(data) < idx + 1:
+            return None
+        comp_len = data[idx]
+        idx += 1
+        if len(data) < idx + comp_len:
+            return None
+        idx += comp_len
+
+        # Extensions
+        if len(data) < idx + 2:
+            return None
+        ext_total_len = int.from_bytes(data[idx:idx+2], 'big')
+        idx += 2
+        end = idx + ext_total_len
+        if end > len(data):
+            end = len(data)
+
+        while idx + 4 <= end:
+            ext_type = int.from_bytes(data[idx:idx+2], 'big')
+            ext_len = int.from_bytes(data[idx+2:idx+4], 'big')
+            ext_data_start = idx + 4
+            ext_data_end = ext_data_start + ext_len
+            if ext_data_end > end:
+                break
+
+            # SNI extension type = 0x0000
+            if ext_type == 0x0000:
+                if ext_len < 2:
+                    break
+                list_len = int.from_bytes(data[ext_data_start:ext_data_start+2], 'big')
+                p = ext_data_start + 2
+                list_end = min(ext_data_end, p + list_len)
+                while p + 3 <= list_end:
+                    name_type = data[p]
+                    name_len = int.from_bytes(data[p+1:p+3], 'big')
+                    p += 3
+                    if p + name_len > list_end:
+                        break
+                    if name_type == 0x00:  # host_name
+                        host_bytes = data[p:p+name_len]
+                        host = host_bytes.decode('utf-8', errors='ignore').strip().lower().rstrip('.')
+                        return host
+                    p += name_len
+
+            idx = ext_data_end
+
+        return None
     except Exception:
         return None
 
@@ -126,6 +288,14 @@ def log_https_request(packet):
     insert_packet_log(ts, src_ip, src_port, dst_ip, dst_port,
                       src_mac, dst_mac,
                       "TLS_CLIENTHELLO", hostname, None, None, None, "HTTPS")
+
+    # If SNI matches any active blocklist, add destination IP to corresponding ipset(s)
+    try:
+        if hostname and dst_ip:
+            for bl_id in find_matching_blocklists_for_host(hostname):
+                ipset_add_ip(bl_id, dst_ip)
+    except Exception as e:
+        print(f"error during ipset add for HTTPS host={hostname} ip={dst_ip}: {e}")
 
 def tcp_packet_handler(packet):
     try:
