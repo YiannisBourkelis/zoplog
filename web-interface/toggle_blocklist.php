@@ -17,6 +17,27 @@ if ($id <= 0 || !in_array($state, ['active','inactive'], true)) {
     exit;
 }
 
+// First attempt to apply firewall change via helper (idempotent)
+$cmd = 'sudo -n /usr/local/sbin/zoplog-firewall-toggle ' . escapeshellarg((string)$id) . ' ' . escapeshellarg($state);
+$descriptors = [1 => ['pipe','w'], 2 => ['pipe','w']];
+$proc = proc_open($cmd, $descriptors, $pipes);
+if (!is_resource($proc)) {
+    http_response_code(500);
+    echo json_encode(['status' => 'error', 'message' => 'Failed to spawn firewall toggle process']);
+    exit;
+}
+$stdout = stream_get_contents($pipes[1]);
+$stderr = stream_get_contents($pipes[2]);
+fclose($pipes[1]);
+fclose($pipes[2]);
+$exitCode = proc_close($proc);
+if ($exitCode !== 0) {
+    http_response_code(500);
+    echo json_encode(['status' => 'error', 'message' => 'Firewall toggle failed (exit ' . $exitCode . '): ' . trim($stderr ?: $stdout)]);
+    exit;
+}
+
+// If firewall step succeeded, update DB state
 $stmt = $mysqli->prepare('UPDATE blocklists SET active = ?, updated_at = ? WHERE id = ?');
 $now = date('Y-m-d H:i:s');
 $stmt->bind_param('ssi', $state, $now, $id);

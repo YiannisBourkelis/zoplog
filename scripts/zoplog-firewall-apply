@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  echo "usage: $0 <blocklist_id>" >&2
+  exit 2
+fi
+
+id="$1"
+if ! [[ "$id" =~ ^[0-9]+$ ]]; then
+  echo "invalid id: $id" >&2
+  exit 2
+fi
+
+setname="blacklist${id}"
+
+# Create ipset if missing (or no-op if exists)
+ipset create "$setname" hash:ip hashsize 4096 timeout 2100200 -exist
+
+# Ensure INPUT rule exists
+if ! iptables -C INPUT -m set --match-set "$setname" src -j DROP 2>/dev/null; then
+  iptables -I INPUT -m set --match-set "$setname" src -j DROP
+fi
+
+# Ensure OUTPUT rule exists
+if ! iptables -C OUTPUT -m set --match-set "$setname" dst -j DROP 2>/dev/null; then
+  iptables -I OUTPUT -m set --match-set "$setname" dst -j DROP
+fi

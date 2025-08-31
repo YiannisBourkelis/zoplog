@@ -2,8 +2,11 @@
 // blocklists.php - list and manage blocklists
 require_once __DIR__ . '/db.php';
 
-// Fetch blocklists
-$res = $mysqli->query("SELECT id, url, description, category, active, created_at, updated_at FROM blocklists ORDER BY created_at DESC");
+// Fetch blocklists with domain counts
+$res = $mysqli->query("SELECT id, url, description, category, active, created_at, updated_at,
+  (SELECT COUNT(*) FROM blocklist_domains bd WHERE bd.blocklist_id = blocklists.id) AS domains_count
+  FROM blocklists
+  ORDER BY created_at DESC");
 $blocklists = [];
 if ($res) {
     while ($row = $res->fetch_assoc()) { $blocklists[] = $row; }
@@ -80,7 +83,10 @@ if ($res) {
       <?php foreach ($blocklists as $b): ?>
         <div class="bg-white rounded-lg shadow p-5 flex flex-col relative group hover:ring-2 hover:ring-red-400 transition">
           <div class="flex items-center justify-between mb-2 relative z-20">
-            <span class="text-xs px-2 py-1 rounded <?= htmlspecialchars($b['category']) === 'social' ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700' ?>"><?= htmlspecialchars(ucfirst($b['category'])) ?></span>
+            <div class="flex items-center gap-2">
+              <span class="text-xs px-2 py-1 rounded <?= htmlspecialchars($b['category']) === 'social' ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700' ?>"><?= htmlspecialchars(ucfirst($b['category'])) ?></span>
+              <span class="text-xs px-2 py-1 rounded bg-gray-100 text-gray-700"><?= (int)($b['domains_count'] ?? 0) ?> domains</span>
+            </div>
             <div class="flex items-center gap-2">
               <button type="button" class="toggle-active flex items-center px-2 py-1 rounded-full transition-colors <?= ($b['active']==='active') ? 'active bg-green-100 text-green-700' : 'inactive bg-gray-100 text-gray-700' ?>" data-id="<?= (int)$b['id'] ?>">
                 <span class="font-semibold text-xs mr-2"><?= ($b['active']==='active') ? 'Active' : 'Inactive' ?></span>

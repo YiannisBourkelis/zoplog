@@ -10,6 +10,42 @@ function respond_json($status, $message, $extra = []) {
     exit;
 }
 
+/**
+ * Execute a shell command and capture exit code, stdout, and stderr.
+ * Returns [code, stdout, stderr].
+ */
+function run_cmd($cmd) {
+    $descriptors = [
+        1 => ['pipe', 'w'], // stdout
+        2 => ['pipe', 'w'], // stderr
+    ];
+    $proc = proc_open($cmd, $descriptors, $pipes, null, null, [
+        'bypass_shell' => false,
+    ]);
+    if (!is_resource($proc)) {
+        return [127, '', 'Failed to spawn process'];
+    }
+    $stdout = stream_get_contents($pipes[1]);
+    $stderr = stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    $code = proc_close($proc);
+    return [$code, $stdout, $stderr];
+}
+
+/**
+ * Apply firewall rules for this blocklist via a root-owned helper.
+ * Expects: sudoers allows www-data to run /usr/local/sbin/zoplog-firewall-apply without password.
+ */
+function ensure_firewall_rules(int $blocklistId) {
+    $cmd = 'sudo -n /usr/local/sbin/zoplog-firewall-apply ' . escapeshellarg((string)$blocklistId);
+    [$code, $out, $err] = run_cmd($cmd);
+    if ($code !== 0) {
+        $detail = trim($err ?: $out);
+        throw new Exception("Firewall apply failed (exit $code): " . ($detail !== '' ? $detail : 'unknown error'));
+    }
+}
+
 $allowedCategories = [
     'adware','malware','phishing','cryptomining','tracking','scam','fakenews','gambling','social','porn','streaming','proxyvpn','shopping','hate','other'
 ];
@@ -106,6 +142,13 @@ try {
         }
     }
     $stmt->close();
+
+    // Before committing, ensure ipset and iptables rules are present
+    try {
+        ensure_firewall_rules($blocklistId);
+    } catch (Throwable $fwErr) {
+        throw new Exception('Firewall setup error: ' . $fwErr->getMessage());
+    }
 
     $mysqli->commit();
 

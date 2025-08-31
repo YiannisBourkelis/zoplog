@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 2 ]]; then
+  echo "usage: $0 <blocklist_id> <active|inactive>" >&2
+  exit 2
+fi
+
+id="$1"
+state="$2"
+
+if ! [[ "$id" =~ ^[0-9]+$ ]]; then
+  echo "invalid id: $id" >&2
+  exit 2
+fi
+
+if [[ "$state" != "active" && "$state" != "inactive" ]]; then
+  echo "invalid state: $state" >&2
+  exit 2
+fi
+
+setname="blacklist${id}"
+
+if [[ "$state" == "active" ]]; then
+  # Ensure INPUT rule exists
+  if ! iptables -C INPUT -m set --match-set "$setname" src -j DROP 2>/dev/null; then
+    iptables -I INPUT -m set --match-set "$setname" src -j DROP
+  fi
+  # Ensure OUTPUT rule exists
+  if ! iptables -C OUTPUT -m set --match-set "$setname" dst -j DROP 2>/dev/null; then
+    iptables -I OUTPUT -m set --match-set "$setname" dst -j DROP
+  fi
+else
+  # Remove INPUT rule if present
+  if iptables -C INPUT -m set --match-set "$setname" src -j DROP 2>/dev/null; then
+    iptables -D INPUT -m set --match-set "$setname" src -j DROP
+  fi
+  # Remove OUTPUT rule if present
+  if iptables -C OUTPUT -m set --match-set "$setname" dst -j DROP 2>/dev/null; then
+    iptables -D OUTPUT -m set --match-set "$setname" dst -j DROP
+  fi
+fi

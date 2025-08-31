@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  echo "usage: $0 <blocklist_id>" >&2
+  exit 2
+fi
+
+id="$1"
+if ! [[ "$id" =~ ^[0-9]+$ ]]; then
+  echo "invalid id: $id" >&2
+  exit 2
+fi
+
+setname="blacklist${id}"
+
+# Remove INPUT rule if present
+if iptables -C INPUT -m set --match-set "$setname" src -j DROP 2>/dev/null; then
+  iptables -D INPUT -m set --match-set "$setname" src -j DROP
+fi
+
+# Remove OUTPUT rule if present
+if iptables -C OUTPUT -m set --match-set "$setname" dst -j DROP 2>/dev/null; then
+  iptables -D OUTPUT -m set --match-set "$setname" dst -j DROP
+fi
+
+# Destroy ipset if present
+echo "Destroying ipset $setname" >&2
+if ipset list "$setname" >/dev/null 2>&1; then
+  ipset destroy "$setname"
+fi
