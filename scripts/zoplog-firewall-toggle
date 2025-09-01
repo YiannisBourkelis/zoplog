@@ -19,7 +19,7 @@ if [[ "$state" != "active" && "$state" != "inactive" ]]; then
   exit 2
 fi
 
-setname="blacklist${id}"
+setname="zoplog-blocklist-${id}"
 
 if [[ "$state" == "active" ]]; then
   # Ensure INPUT rule exists

@@ -136,7 +136,7 @@ def find_matching_blocklists_for_host(host: str):
 
 
 def ipset_add_ip(blocklist_id: int, ip: str):
-    """Call privileged helper to add ip to ipset 'blacklist{blocklist_id}'."""
+    """Call privileged helper to add ip to ipset 'zoplog-blocklist-{blocklist_id}'."""
     try:
         result = subprocess.run(
             ["sudo", "-n", "/usr/local/sbin/zoplog-firewall-ipset-add", str(blocklist_id), ip],

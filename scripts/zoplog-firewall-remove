@@ -12,7 +12,7 @@ if ! [[ "$id" =~ ^[0-9]+$ ]]; then
   exit 2
 fi
 
-setname="blacklist${id}"
+setname="zoplog-blocklist-${id}"
 
 # Remove INPUT rule if present
 if iptables -C INPUT -m set --match-set "$setname" src -j DROP 2>/dev/null; then
