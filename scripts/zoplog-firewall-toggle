@@ -19,40 +19,59 @@ if [[ "$state" != "active" && "$state" != "inactive" ]]; then
   exit 2
 fi
 
-setname="zoplog-blocklist-${id}"
+TABLE="zoplog"
+SET_V4="zoplog-blocklist-${id}-v4"
+SET_V6="zoplog-blocklist-${id}-v6"
+
+ensure_base() {
+  nft list table inet "$TABLE" >/dev/null 2>&1 || nft add table inet "$TABLE"
+  nft list chain inet "$TABLE" input  >/dev/null 2>&1 || nft add chain inet "$TABLE" input  '{ type filter hook input  priority 0; policy accept; }'
+  nft list chain inet "$TABLE" output >/dev/null 2>&1 || nft add chain inet "$TABLE" output '{ type filter hook output priority 0; policy accept; }'
+}
+
+has_rule() {
+  local chain="$1"; local comment="$2"
+  nft list chain inet "$TABLE" "$chain" 2>/dev/null | grep -Fq "comment \"$comment\""
+}
+
+add_rule_if_missing() {
+  local chain="$1"; shift
+  local comment="$1"; shift
+  if ! has_rule "$chain" "$comment"; then
+    nft add rule inet "$TABLE" "$chain" "$@" comment "$comment"
+  fi
+}
+
+delete_rule_by_comment() {
+  local chain="$1"; local comment="$2"
+  local handle
+  handle=$(nft -a list chain inet "$TABLE" "$chain" 2>/dev/null | awk -v c="comment \"$comment\"" '$0 ~ c { for(i=1;i<=NF;i++){ if($i=="handle"){ print $(i+1); exit } } }')
+  if [[ -n "${handle:-}" ]]; then
+    nft delete rule inet "$TABLE" "$chain" handle "$handle" || true
+  fi
+}
 
 if [[ "$state" == "active" ]]; then
-  # Ensure INPUT rule exists
-  if ! iptables -C INPUT -m set --match-set "$setname" src -j DROP 2>/dev/null; then
-    iptables -I INPUT -m set --match-set "$setname" src -j DROP
-  fi
-  # Ensure INPUT LOG rule exists
-  if ! iptables -C INPUT -m set --match-set "$setname" src -j LOG --log-prefix "ZOPLOG-BLOCKLIST-IN " --log-level 4 2>/dev/null; then
-    iptables -I INPUT -m set --match-set "$setname" src -j LOG --log-prefix "ZOPLOG-BLOCKLIST-IN " --log-level 4
-  fi
-  # Ensure OUTPUT rule exists
-  if ! iptables -C OUTPUT -m set --match-set "$setname" dst -j DROP 2>/dev/null; then
-    iptables -I OUTPUT -m set --match-set "$setname" dst -j DROP
-  fi
-  # Ensure OUTPUT LOG rule exists
-  if ! iptables -C OUTPUT -m set --match-set "$setname" dst -j LOG --log-prefix "ZOPLOG-BLOCKLIST-OUT " --log-level 4 2>/dev/null; then
-    iptables -I OUTPUT -m set --match-set "$setname" dst -j LOG --log-prefix "ZOPLOG-BLOCKLIST-OUT " --log-level 4
-  fi
+  ensure_base
+  nft list set inet "$TABLE" "$SET_V4" >/dev/null 2>&1 || nft add set inet "$TABLE" "$SET_V4" '{ type ipv4_addr; flags interval; }'
+  nft list set inet "$TABLE" "$SET_V6" >/dev/null 2>&1 || nft add set inet "$TABLE" "$SET_V6" '{ type ipv6_addr; flags interval; }'
+
+  add_rule_if_missing input  "zoplog-bl-${id}-input-v4-log"  ip  saddr @"$SET_V4" log prefix "ZOPLOG-BLOCKLIST-IN " level warn
+  add_rule_if_missing input  "zoplog-bl-${id}-input-v4-drop" ip  saddr @"$SET_V4" drop
+  add_rule_if_missing input  "zoplog-bl-${id}-input-v6-log"  ip6 saddr @"$SET_V6" log prefix "ZOPLOG-BLOCKLIST-IN " level warn
+  add_rule_if_missing input  "zoplog-bl-${id}-input-v6-drop" ip6 saddr @"$SET_V6" drop
+
+  add_rule_if_missing output "zoplog-bl-${id}-output-v4-log"  ip  daddr @"$SET_V4" log prefix "ZOPLOG-BLOCKLIST-OUT " level warn
+  add_rule_if_missing output "zoplog-bl-${id}-output-v4-drop" ip  daddr @"$SET_V4" drop
+  add_rule_if_missing output "zoplog-bl-${id}-output-v6-log"  ip6 daddr @"$SET_V6" log prefix "ZOPLOG-BLOCKLIST-OUT " level warn
+  add_rule_if_missing output "zoplog-bl-${id}-output-v6-drop" ip6 daddr @"$SET_V6" drop
 else
-  # Remove INPUT rule if present
-  if iptables -C INPUT -m set --match-set "$setname" src -j DROP 2>/dev/null; then
-    iptables -D INPUT -m set --match-set "$setname" src -j DROP
-  fi
-  # Remove INPUT LOG rule if present
-  if iptables -C INPUT -m set --match-set "$setname" src -j LOG --log-prefix "ZOPLOG-BLOCKLIST-IN " --log-level 4 2>/dev/null; then
-    iptables -D INPUT -m set --match-set "$setname" src -j LOG --log-prefix "ZOPLOG-BLOCKLIST-IN " --log-level 4
-  fi
-  # Remove OUTPUT rule if present
-  if iptables -C OUTPUT -m set --match-set "$setname" dst -j DROP 2>/dev/null; then
-    iptables -D OUTPUT -m set --match-set "$setname" dst -j DROP
-  fi
-  # Remove OUTPUT LOG rule if present
-  if iptables -C OUTPUT -m set --match-set "$setname" dst -j LOG --log-prefix "ZOPLOG-BLOCKLIST-OUT " --log-level 4 2>/dev/null; then
-    iptables -D OUTPUT -m set --match-set "$setname" dst -j LOG --log-prefix "ZOPLOG-BLOCKLIST-OUT " --log-level 4
-  fi
+  delete_rule_by_comment input  "zoplog-bl-${id}-input-v4-log"
+  delete_rule_by_comment input  "zoplog-bl-${id}-input-v4-drop"
+  delete_rule_by_comment input  "zoplog-bl-${id}-input-v6-log"
+  delete_rule_by_comment input  "zoplog-bl-${id}-input-v6-drop"
+  delete_rule_by_comment output "zoplog-bl-${id}-output-v4-log"
+  delete_rule_by_comment output "zoplog-bl-${id}-output-v4-drop"
+  delete_rule_by_comment output "zoplog-bl-${id}-output-v6-log"
+  delete_rule_by_comment output "zoplog-bl-${id}-output-v6-drop"
 fi

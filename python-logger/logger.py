@@ -135,8 +135,81 @@ def find_matching_blocklists_for_host(host: str):
             pass
 
 
-def ipset_add_ip(blocklist_id: int, ip: str):
-    """Call privileged helper to add ip to ipset 'zoplog-blocklist-{blocklist_id}'."""
+def find_matching_blocklist_domains(host: str):
+    """Return list of tuples (blocklist_id, blocklist_domain_id) for exact host matches in active blocklists."""
+    global conn
+    h = _normalize_hostname(host)
+    if not h:
+        return []
+    try:
+        cur = conn.cursor()
+        query = (
+            "SELECT bd.blocklist_id, bd.id AS blocklist_domain_id "
+            "FROM blocklist_domains bd "
+            "JOIN blocklists bl ON bl.id = bd.blocklist_id "
+            "WHERE bl.active = 'active' AND bd.domain = %s"
+        )
+        cur.execute(query, (h,))
+        rows = cur.fetchall()
+        return [(row[0], row[1]) for row in rows]
+    except mariadb.Error as e:
+        if "MySQL server has gone away" in str(e):
+            try:
+                conn = mariadb.connect(**DB_CONFIG)
+                cur = conn.cursor()
+                cur.execute(query, (h,))
+                rows = cur.fetchall()
+                return [(row[0], row[1]) for row in rows]
+            except Exception as e2:
+                print(f"Blocklist domain lookup failed after reconnect: {e2}")
+                return []
+        else:
+            print(f"Blocklist domain lookup error: {e}")
+            return []
+    except Exception as e:
+        print(f"Blocklist domain lookup unexpected error: {e}")
+        return []
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+
+
+def _record_blocked_ip(blocklist_domain_id: int, ip: str):
+    """Insert or update the blocked IP record linked to a specific blocklist_domain row."""
+    global conn, cursor
+    if not ip or not blocklist_domain_id:
+        return
+    try:
+        ip_id = get_or_insert_ip(ip)
+        if not ip_id:
+            return
+        # Upsert to track first/last_seen and hit_count
+        cursor.execute(
+            """
+            INSERT INTO blocked_ips (blocklist_domain_id, ip_id, first_seen, last_seen, hit_count)
+            VALUES (%s, %s, NOW(), NOW(), 1)
+            ON DUPLICATE KEY UPDATE last_seen = VALUES(last_seen), hit_count = hit_count + 1
+            """,
+            (blocklist_domain_id, ip_id),
+        )
+        conn.commit()
+    except mariadb.Error as e:
+        if "MySQL server has gone away" in str(e):
+            try:
+                conn = mariadb.connect(**DB_CONFIG)
+                cursor = conn.cursor()
+                _record_blocked_ip(blocklist_domain_id, ip)
+            except Exception as e2:
+                print(f"blocked_ips insert failed after reconnect: {e2}")
+        else:
+            print(f"blocked_ips insert error: {e}")
+
+
+def ipset_add_ip(blocklist_id: int, ip: str, blocklist_domain_id: int | None = None):
+    """Add IP to nft set for blocklist and record it in DB linked to the specific domain when provided."""
+    # First try to apply firewall change
     try:
         result = subprocess.run(
             ["sudo", "-n", "/usr/local/sbin/zoplog-firewall-ipset-add", str(blocklist_id), ip],
@@ -152,14 +225,33 @@ def ipset_add_ip(blocklist_id: int, ip: str):
     except Exception as e:
         print(f"ipset add error id={blocklist_id} ip={ip} err={e}")
 
+    # Independently record in DB (even if firewall fails, for observability)
+    if blocklist_domain_id:
+        try:
+            _record_blocked_ip(blocklist_domain_id, ip)
+        except Exception as e:
+            print(f"record blocked_ip error domain_id={blocklist_domain_id} ip={ip} err={e}")
+
 # --- Packet logging ---
+def _get_ips(packet):
+    try:
+        if packet.haslayer(scapy.IP):
+            return packet[scapy.IP].src, packet[scapy.IP].dst
+        if packet.haslayer(scapy.IPv6):
+            return packet[scapy.IPv6].src, packet[scapy.IPv6].dst
+    except Exception:
+        pass
+    return None, None
+
+
 def log_http_request(packet):
     ts = datetime.fromtimestamp(float(packet.time)).strftime('%Y-%m-%d %H:%M:%S')
     http_request = packet[HTTPRequest]
 
-    src_ip, dst_ip = packet[scapy.IP].src, packet[scapy.IP].dst
+    src_ip, dst_ip = _get_ips(packet)
     src_port, dst_port = packet[scapy.TCP].sport, packet[scapy.TCP].dport
-    src_mac, dst_mac = packet[scapy.Ether].src, packet[scapy.Ether].dst
+    src_mac = packet[scapy.Ether].src if packet.haslayer(scapy.Ether) else None
+    dst_mac = packet[scapy.Ether].dst if packet.haslayer(scapy.Ether) else None
 
     method = http_request.Method.decode()
     host = http_request.Host.decode() if http_request.Host else None
@@ -172,11 +264,11 @@ def log_http_request(packet):
                       src_mac, dst_mac,
                       method, host, path, user_agent, accept_language, "HTTP")
 
-    # If host matches any active blocklist, add destination IP to corresponding ipset(s)
+    # If host matches any active blocklist, add destination IP to corresponding set(s) and record it
     try:
         if host and dst_ip:
-            for bl_id in find_matching_blocklists_for_host(host):
-                ipset_add_ip(bl_id, dst_ip)
+            for bl_id, bd_id in find_matching_blocklist_domains(host):
+                ipset_add_ip(bl_id, dst_ip, bd_id)
     except Exception as e:
         print(f"error during ipset add for HTTP host={host} ip={dst_ip}: {e}")
 
@@ -278,9 +370,10 @@ def extract_tls_sni(packet):
 def log_https_request(packet):
     ts = datetime.fromtimestamp(float(packet.time)).strftime('%Y-%m-%d %H:%M:%S')
 
-    src_ip, dst_ip = packet[scapy.IP].src, packet[scapy.IP].dst
+    src_ip, dst_ip = _get_ips(packet)
     src_port, dst_port = packet[scapy.TCP].sport, packet[scapy.TCP].dport
-    src_mac, dst_mac = packet[scapy.Ether].src, packet[scapy.Ether].dst
+    src_mac = packet[scapy.Ether].src if packet.haslayer(scapy.Ether) else None
+    dst_mac = packet[scapy.Ether].dst if packet.haslayer(scapy.Ether) else None
 
     hostname = extract_tls_sni(packet)
 
@@ -289,11 +382,11 @@ def log_https_request(packet):
                       src_mac, dst_mac,
                       "TLS_CLIENTHELLO", hostname, None, None, None, "HTTPS")
 
-    # If SNI matches any active blocklist, add destination IP to corresponding ipset(s)
+    # If SNI matches any active blocklist, add destination IP to corresponding set(s) and record it
     try:
         if hostname and dst_ip:
-            for bl_id in find_matching_blocklists_for_host(hostname):
-                ipset_add_ip(bl_id, dst_ip)
+            for bl_id, bd_id in find_matching_blocklist_domains(hostname):
+                ipset_add_ip(bl_id, dst_ip, bd_id)
     except Exception as e:
         print(f"error during ipset add for HTTPS host={hostname} ip={dst_ip}: {e}")
 

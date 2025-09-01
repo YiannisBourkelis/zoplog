@@ -12,30 +12,26 @@ if ! [[ "$id" =~ ^[0-9]+$ ]]; then
   exit 2
 fi
 
-setname="zoplog-blocklist-${id}"
+TABLE="zoplog"
+SET_V4="zoplog-blocklist-${id}-v4"
+SET_V6="zoplog-blocklist-${id}-v6"
 
-# Remove INPUT rule if present
-if iptables -C INPUT -m set --match-set "$setname" src -j DROP 2>/dev/null; then
-  iptables -D INPUT -m set --match-set "$setname" src -j DROP
-fi
+delete_rule_by_comment() {
+  local chain="$1"; local comment="$2"
+  local handle
+  handle=$(nft -a list chain inet "$TABLE" "$chain" 2>/dev/null | awk -v c="comment \"$comment\"" '$0 ~ c { for(i=1;i<=NF;i++){ if($i=="handle"){ print $(i+1); exit } } }')
+  if [[ -n "${handle:-}" ]]; then
+    nft delete rule inet "$TABLE" "$chain" handle "$handle" || true
+  fi
+}
 
-# Remove INPUT LOG rule if present
-if iptables -C INPUT -m set --match-set "$setname" src -j LOG --log-prefix "ZOPLOG-BLOCKLIST-IN " --log-level 4 2>/dev/null; then
-  iptables -D INPUT -m set --match-set "$setname" src -j LOG --log-prefix "ZOPLOG-BLOCKLIST-IN " --log-level 4
-fi
+for chain in input output; do
+  delete_rule_by_comment "$chain"  "zoplog-bl-${id}-${chain}-v4-log"
+  delete_rule_by_comment "$chain"  "zoplog-bl-${id}-${chain}-v4-drop"
+  delete_rule_by_comment "$chain"  "zoplog-bl-${id}-${chain}-v6-log"
+  delete_rule_by_comment "$chain"  "zoplog-bl-${id}-${chain}-v6-drop"
+done
 
-# Remove OUTPUT rule if present
-if iptables -C OUTPUT -m set --match-set "$setname" dst -j DROP 2>/dev/null; then
-  iptables -D OUTPUT -m set --match-set "$setname" dst -j DROP
-fi
-
-# Remove OUTPUT LOG rule if present
-if iptables -C OUTPUT -m set --match-set "$setname" dst -j LOG --log-prefix "ZOPLOG-BLOCKLIST-OUT " --log-level 4 2>/dev/null; then
-  iptables -D OUTPUT -m set --match-set "$setname" dst -j LOG --log-prefix "ZOPLOG-BLOCKLIST-OUT " --log-level 4
-fi
-
-# Destroy ipset if present
-echo "Destroying ipset $setname" >&2
-if ipset list "$setname" >/dev/null 2>&1; then
-  ipset destroy "$setname"
-fi
+# Destroy sets if present
+nft list set inet "$TABLE" "$SET_V4" >/dev/null 2>&1 && nft delete set inet "$TABLE" "$SET_V4" || true
+nft list set inet "$TABLE" "$SET_V6" >/dev/null 2>&1 && nft delete set inet "$TABLE" "$SET_V6" || true
