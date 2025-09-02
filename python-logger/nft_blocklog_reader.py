@@ -1,0 +1,200 @@
+#!/usr/bin/env python3
+"""
+Realtime reader for nftables LOG entries with prefixes:
+  - ZOPLOG-BLOCKLIST-IN
+  - ZOPLOG-BLOCKLIST-OUT
+
+Uses systemd.journal.Reader (no sleep loops). Prints each matched log to stdout
+and stores events into the database. No schema creation here.
+"""
+
+import re
+import sys
+from typing import Dict, Optional, Tuple
+
+from config import DB_CONFIG
+
+# DB driver (PyMySQL preferred; fallback to mysql-connector)
+try:
+    import pymysql as mariadb
+except Exception:
+    try:
+        import mysql.connector as mariadb
+    except Exception:
+        sys.stderr.write("No MySQL driver found. Install 'pymysql' or 'mysql-connector-python'.\n")
+        sys.exit(1)
+
+# systemd journal reader
+try:
+    from systemd import journal as sd_journal
+except Exception:
+    sys.stderr.write("python3-systemd is required. Install with: sudo apt install python3-systemd\n")
+    sys.exit(1)
+
+PREFIX_IN = "ZOPLOG-BLOCKLIST-IN"
+PREFIX_OUT = "ZOPLOG-BLOCKLIST-OUT"
+
+def db_connect():
+    conn = mariadb.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    return conn, cur
+
+def get_or_insert_ip(cursor, ip: Optional[str]) -> Optional[int]:
+    if not ip:
+        return None
+    cursor.execute(
+        "INSERT INTO ip_addresses (ip_address) VALUES (%s) "
+        "ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)",
+        (ip,),
+    )
+    return cursor.lastrowid
+
+# Inject a space right after the prefix token if glued (e.g., ...-OUTIN=)
+def _normalize_prefix_spacing(msg: str) -> str:
+    for pref in (PREFIX_IN, PREFIX_OUT):
+        i = msg.find(pref)
+        if i != -1:
+            j = i + len(pref)
+            if j < len(msg) and msg[j] != ' ':
+                msg = msg[:j] + ' ' + msg[j:]
+    return msg
+
+kv_re = re.compile(r"\b([A-Z]+)=([^\s]+)")
+
+def parse_log_line(line: str) -> Optional[Tuple[str, Dict[str, str]]]:
+    if PREFIX_IN not in line and PREFIX_OUT not in line:
+        return None
+    line = _normalize_prefix_spacing(line)
+    # If both appear (rare), choose the first occurrence
+    idx_in = line.find(PREFIX_IN)
+    idx_out = line.find(PREFIX_OUT)
+    if idx_in == -1 and idx_out == -1:
+        return None
+    if idx_in != -1 and (idx_out == -1 or idx_in < idx_out):
+        direction = "IN"
+    else:
+        direction = "OUT"
+    fields = {m.group(1): m.group(2) for m in kv_re.finditer(line)}
+    return direction, fields
+
+def insert_block_event(conn, cursor, direction: str, fields: Dict[str, str], raw: str):
+    iface_in = fields.get("IN")
+    iface_out = fields.get("OUT")
+    proto = fields.get("PROTO")
+    src_ip = fields.get("SRC")
+    dst_ip = fields.get("DST")
+    spt = fields.get("SPT")
+    dpt = fields.get("DPT")
+
+    try:
+        src_port = int(spt) if spt and spt.isdigit() else None
+    except Exception:
+        src_port = None
+    try:
+        dst_port = int(dpt) if dpt and dpt.isdigit() else None
+    except Exception:
+        dst_port = None
+
+    src_ip_id = get_or_insert_ip(cursor, src_ip)
+    dst_ip_id = get_or_insert_ip(cursor, dst_ip)
+
+    cursor.execute(
+        """
+        INSERT INTO blocked_events
+          (event_time, direction, src_ip_id, dst_ip_id, src_port, dst_port, proto, iface_in, iface_out, message)
+        VALUES (NOW(), %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (direction, src_ip_id, dst_ip_id, src_port, dst_port, proto, iface_in, iface_out, raw[:65535]),
+    )
+
+def journal_reader():
+    r = sd_journal.Reader()
+    try:
+        r.this_boot()
+    except Exception:
+        pass
+    # Kernel transport - correct way to filter kernel messages
+    r.add_match(_TRANSPORT="kernel")
+    # Start from tail to only get new entries
+    r.seek_tail()
+    r.get_previous()
+    return r
+
+def main():
+    print("Starting nft block log reader (systemd-journal)…", flush=True)
+    print("Tip: run with sudo or add your user to 'systemd-journal' group.", flush=True)
+
+    conn, cursor = db_connect()
+    r = journal_reader()
+
+    try:
+        while True:
+            # Wait for new journal entries
+            r.wait()
+            
+            # Process all new entries
+            for entry in r:
+                msg = entry.get('MESSAGE', '')
+                if not msg:
+                    continue
+
+                # Fast path: only care for our prefixes
+                if "ZOPLOG-BLOCKLIST-" not in msg:
+                    continue
+
+                print(f"[RAW JOURNAL] {msg}", flush=True)
+
+                # Normalize glued prefix (…-OUTIN= / …-ININ=)
+                raw = _normalize_prefix_spacing(msg)
+                parsed = parse_log_line(raw)
+                if not parsed:
+                    # Show raw for troubleshooting
+                    print(f"[DEBUG] Unparsed: {raw}", flush=True)
+                    continue
+
+                direction, fields = parsed
+
+                # Print summary + raw line for troubleshooting
+                proto = fields.get('PROTO') or ''
+                src = fields.get('SRC') or ''
+                dst = fields.get('DST') or ''
+                spt = fields.get('SPT') or ''
+                dpt = fields.get('DPT') or ''
+                inif = fields.get('IN') or ''
+                outif = fields.get('OUT') or ''
+                print(f"[{direction}] {proto} {src}:{spt} -> {dst}:{dpt} IN={inif} OUT={outif}", flush=True)
+
+                # DB insert
+                try:
+                    insert_block_event(conn, cursor, direction, fields, raw)
+                    conn.commit()
+                    print(f"[DB] Inserted {direction} event", flush=True)
+                except mariadb.Error as e:
+                    emsg = str(e)
+                    if "gone away" in emsg or "Lost connection" in emsg:
+                        try:
+                            cursor.close()
+                        except Exception:
+                            pass
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
+                        conn, cursor = db_connect()
+                        sys.stderr.write("Reconnected to DB after 'gone away'.\n")
+                    else:
+                        sys.stderr.write(f"DB error: {e}\n")
+                except Exception as e:
+                    sys.stderr.write(f"Unexpected error: {e}\n")
+
+    except KeyboardInterrupt:
+        print("Stopping…")
+    finally:
+        try:
+            cursor.close()
+            conn.close()
+        except Exception:
+            pass
+
+if __name__ == "__main__":
+    main()

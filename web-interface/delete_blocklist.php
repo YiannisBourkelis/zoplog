@@ -30,24 +30,30 @@ try {
     if (!$stmt->execute()) throw new Exception($stmt->error);
     $stmt->close();
 
-    // Before committing, remove firewall rules via helper
+    // Attempt to remove firewall rules via helper, but do not fail deletion if they don't exist
+    $warning = null;
     $cmd = 'sudo -n /usr/local/sbin/zoplog-firewall-remove ' . escapeshellarg((string)$id);
     $descriptors = [1 => ['pipe','w'], 2 => ['pipe','w']];
-    $proc = proc_open($cmd, $descriptors, $pipes);
-    if (!is_resource($proc)) {
-        throw new Exception('Failed to spawn firewall removal process');
-    }
-    $stdout = stream_get_contents($pipes[1]);
-    $stderr = stream_get_contents($pipes[2]);
-    fclose($pipes[1]);
-    fclose($pipes[2]);
-    $exitCode = proc_close($proc);
-    if ($exitCode !== 0) {
-        throw new Exception('Firewall removal failed (exit ' . $exitCode . '): ' . trim($stderr ?: $stdout));
+    $proc = @proc_open($cmd, $descriptors, $pipes);
+    if (is_resource($proc)) {
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $exitCode = proc_close($proc);
+        if ($exitCode !== 0) {
+            $warning = 'Firewall removal returned exit code ' . $exitCode . ': ' . trim($stderr ?: $stdout);
+        }
+    } else {
+        $warning = 'Could not start firewall removal helper; continuing with DB deletion.';
     }
 
     $mysqli->commit();
-    echo json_encode(['status' => 'ok']);
+    $resp = ['status' => 'ok'];
+    if ($warning) {
+        $resp['warning'] = $warning;
+    }
+    echo json_encode($resp);
 } catch (Throwable $e) {
     $mysqli->rollback();
     http_response_code(500);
