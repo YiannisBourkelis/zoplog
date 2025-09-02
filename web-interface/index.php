@@ -146,6 +146,44 @@ $top365 = $mysqli->query("
     LIMIT 200
 ");
 
+// Top 200 blocked hosts (30 days) - normalized to reduce retry noise
+$topBlocked30 = $mysqli->query("
+    SELECT 
+        COALESCE(h.hostname, dst_ip.ip_address, 'Unknown') as blocked_host,
+        COUNT(DISTINCT CONCAT(
+            COALESCE(src_ip_id, ''), '-',
+            COALESCE(dst_ip_id, ''), '-', 
+            COALESCE(dst_port, ''), '-',
+            FLOOR(UNIX_TIMESTAMP(event_time) / 30)
+        )) as cnt
+    FROM blocked_events be
+    LEFT JOIN ip_addresses dst_ip ON be.dst_ip_id = dst_ip.id
+    LEFT JOIN hostnames h ON h.ip_id = dst_ip.id
+    WHERE be.event_time >= NOW() - INTERVAL 30 DAY
+    GROUP BY COALESCE(h.hostname, dst_ip.ip_address)
+    ORDER BY cnt DESC
+    LIMIT 200
+");
+
+// Top 200 blocked hosts (365 days) - normalized to reduce retry noise  
+$topBlocked365 = $mysqli->query("
+    SELECT 
+        COALESCE(h.hostname, dst_ip.ip_address, 'Unknown') as blocked_host,
+        COUNT(DISTINCT CONCAT(
+            COALESCE(src_ip_id, ''), '-',
+            COALESCE(dst_ip_id, ''), '-', 
+            COALESCE(dst_port, ''), '-',
+            FLOOR(UNIX_TIMESTAMP(event_time) / 30)
+        )) as cnt
+    FROM blocked_events be
+    LEFT JOIN ip_addresses dst_ip ON be.dst_ip_id = dst_ip.id
+    LEFT JOIN hostnames h ON h.ip_id = dst_ip.id
+    WHERE be.event_time >= NOW() - INTERVAL 365 DAY
+    GROUP BY COALESCE(h.hostname, dst_ip.ip_address)
+    ORDER BY cnt DESC
+    LIMIT 200
+");
+
 // Browser stats - detailed categorization
 $uaRes = $mysqli->query("
     SELECT ua.user_agent, COUNT(*) as cnt
@@ -433,22 +471,51 @@ for ($i = 9; $i >= 0; $i--) {
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
       <!-- Top Hosts 30d -->
       <div class="bg-white rounded-2xl shadow p-6">
-        <h2 class="text-xl font-semibold mb-4">Top 200 Hosts (Last 30 Days)</h2>
+        <h2 class="text-xl font-semibold mb-4 text-green-600">Top 200 Hosts (Last 30 Days)</h2>
+        <p class="text-sm text-gray-600 mb-3">Most frequently accessed allowed destinations</p>
         <ol class="list-decimal pl-6 space-y-1 h-64 overflow-y-auto">
           <?php while ($row = $top30->fetch_assoc()): ?>
-            <li><?= htmlspecialchars($row['hostname']) ?> 
-                <span class="text-gray-500">(<?= $row['cnt'] ?>)</span></li>
+            <li class="text-sm"><?= htmlspecialchars($row['hostname']) ?> 
+                <span class="text-gray-500">(<?= number_format($row['cnt']) ?>)</span></li>
           <?php endwhile; ?>
         </ol>
       </div>
 
       <!-- Top Hosts 365d -->
       <div class="bg-white rounded-2xl shadow p-6">
-        <h2 class="text-xl font-semibold mb-4">Top 200 Hosts (Last 365 Days)</h2>
+        <h2 class="text-xl font-semibold mb-4 text-green-600">Top 200 Hosts (Last 365 Days)</h2>
+        <p class="text-sm text-gray-600 mb-3">Most frequently accessed allowed destinations</p>
         <ol class="list-decimal pl-6 space-y-1 h-64 overflow-y-auto">
           <?php while ($row = $top365->fetch_assoc()): ?>
-            <li><?= htmlspecialchars($row['hostname']) ?> 
-                <span class="text-gray-500">(<?= $row['cnt'] ?>)</span></li>
+            <li class="text-sm"><?= htmlspecialchars($row['hostname']) ?> 
+                <span class="text-gray-500">(<?= number_format($row['cnt']) ?>)</span></li>
+          <?php endwhile; ?>
+        </ol>
+      </div>
+    </div>
+
+    <!-- BLOCKED HOSTS SECTION -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+      <!-- Top Blocked Hosts 30d -->
+      <div class="bg-white rounded-2xl shadow p-6">
+        <h2 class="text-xl font-semibold mb-4 text-red-600">Top 200 Blocked Hosts (Last 30 Days)</h2>
+        <p class="text-sm text-gray-600 mb-3">Most frequently blocked destinations <span class="text-xs">*normalized</span></p>
+        <ol class="list-decimal pl-6 space-y-1 h-64 overflow-y-auto">
+          <?php while ($row = $topBlocked30->fetch_assoc()): ?>
+            <li class="text-sm"><?= htmlspecialchars($row['blocked_host']) ?> 
+                <span class="text-red-500">(<?= number_format($row['cnt']) ?> blocked)</span></li>
+          <?php endwhile; ?>
+        </ol>
+      </div>
+
+      <!-- Top Blocked Hosts 365d -->
+      <div class="bg-white rounded-2xl shadow p-6">
+        <h2 class="text-xl font-semibold mb-4 text-red-600">Top 200 Blocked Hosts (Last 365 Days)</h2>
+        <p class="text-sm text-gray-600 mb-3">Most frequently blocked destinations <span class="text-xs">*normalized</span></p>
+        <ol class="list-decimal pl-6 space-y-1 h-64 overflow-y-auto">
+          <?php while ($row = $topBlocked365->fetch_assoc()): ?>
+            <li class="text-sm"><?= htmlspecialchars($row['blocked_host']) ?> 
+                <span class="text-red-500">(<?= number_format($row['cnt']) ?> blocked)</span></li>
           <?php endwhile; ?>
         </ol>
       </div>

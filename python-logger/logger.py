@@ -32,6 +32,30 @@ def get_or_insert(table, column, value):
     )
     return cursor.lastrowid
 
+def get_or_insert_hostname_with_ip(hostname, ip_id):
+    """Insert hostname with IP relationship or get existing one, updating IP if needed"""
+    if not hostname:
+        return None
+    
+    # First check if hostname exists
+    cursor.execute("SELECT id, ip_id FROM hostnames WHERE hostname = %s", (hostname,))
+    result = cursor.fetchone()
+    
+    if result:
+        existing_id, existing_ip_id = result
+        # If IP relationship doesn't exist but we have one, update it
+        if not existing_ip_id and ip_id:
+            cursor.execute("UPDATE hostnames SET ip_id = %s WHERE id = %s", (ip_id, existing_id))
+            conn.commit()
+        return existing_id
+    else:
+        # Insert new hostname with IP relationship
+        cursor.execute(
+            "INSERT INTO hostnames (hostname, ip_id) VALUES (%s, %s)",
+            (hostname, ip_id)
+        )
+        return cursor.lastrowid
+
 def get_or_insert_ip(ip_address):
     return get_or_insert("ip_addresses", "ip_address", ip_address)
 
@@ -48,7 +72,7 @@ def insert_packet_log(packet_timestamp, src_ip, src_port, dst_ip, dst_port,
         dst_ip_id = get_or_insert_ip(dst_ip)
         src_mac_id = get_or_insert_mac(src_mac)
         dst_mac_id = get_or_insert_mac(dst_mac)
-        hostname_id = get_or_insert("hostnames", "hostname", hostname) if hostname else None
+        hostname_id = get_or_insert_hostname_with_ip(hostname, dst_ip_id) if hostname else None
         path_id = get_or_insert("paths", "path", path) if path else None
         user_agent_id = get_or_insert("user_agents", "user_agent", user_agent) if user_agent else None
         accept_language_id = get_or_insert("accept_languages", "accept_language", accept_language) if accept_language else None
