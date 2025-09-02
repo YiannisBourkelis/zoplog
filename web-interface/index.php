@@ -641,7 +641,7 @@ for ($i = 9; $i >= 0; $i--) {
     <!-- Top Hosts -->
     <div class="bg-white rounded-2xl shadow p-6 mt-6">
       <h2 class="text-xl font-semibold mb-4">Top Hosts</h2>
-      <table class="min-w-full text-sm text-left">
+      <table id="topHostsTable" class="min-w-full text-sm text-left">
         <thead class="bg-gray-200">
           <tr>
             <th class="px-4 py-2">Hostname</th>
@@ -730,6 +730,11 @@ for ($i = 9; $i >= 0; $i--) {
   </div>
 
 <script>
+// Chart references for real-time updates
+let trafficChart;
+let timelineChart;
+let systemChart;
+
 // Traffic Breakdown Pie Chart (Last 10 min)
 const trafficData = {
   labels: ['Allowed Requests', 'Blocked Requests (Normalized)'],
@@ -740,7 +745,7 @@ const trafficData = {
     borderWidth: 2
   }]
 };
-new Chart(document.getElementById('trafficChart'), {
+trafficChart = new Chart(document.getElementById('trafficChart'), {
   type: 'pie',
   data: trafficData,
   options: {
@@ -810,7 +815,7 @@ const systemData = {
     }
   ]
 };
-new Chart(document.getElementById('systemChart'), {
+systemChart = new Chart(document.getElementById('systemChart'), {
   type: 'line',
   data: systemData,
   options: {
@@ -874,7 +879,7 @@ const timelineData = {
     }
   ]
 };
-new Chart(document.getElementById('timelineChart'), {
+timelineChart = new Chart(document.getElementById('timelineChart'), {
   type: 'line',
   data: timelineData,
   options: {
@@ -986,6 +991,267 @@ new Chart(document.getElementById('langChart'), {
     }
   }
 });
+
+// Real-time chart updates every 2 seconds
+async function updateChartsRealtime() {
+  try {
+    const response = await fetch('api/realtime_data.php');
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data = await response.json();
+    
+    // Update summary cards
+    if (data.summary) {
+      const summary = data.summary;
+      
+      // Update summary card values
+      document.querySelector('.text-blue-600').textContent = summary.total_requests.toLocaleString();
+      document.querySelector('.text-green-600').textContent = summary.allowed_requests.toLocaleString();
+      document.querySelector('.text-red-600').textContent = summary.blocked_requests.toLocaleString();
+      document.querySelector('.text-purple-600').textContent = summary.unique_ips.toLocaleString();
+    }
+    
+    // Update timeline chart
+    if (timelineChart && data.timeline) {
+      timelineChart.data.labels = data.timeline.map(item => item.minute);
+      timelineChart.data.datasets[0].data = data.timeline.map(item => item.allowed);
+      timelineChart.data.datasets[1].data = data.timeline.map(item => item.blocked);
+      timelineChart.data.datasets[2].data = data.timeline.map(item => item.total);
+      timelineChart.update('none'); // 'none' for no animation to make it smoother
+    }
+    
+    // Update traffic breakdown pie chart
+    if (trafficChart && data.traffic_breakdown) {
+      const breakdown = data.traffic_breakdown;
+      trafficChart.data.datasets[0].data = [breakdown.allowed, breakdown.blocked];
+      
+      // Update tooltip calculation for new totals
+      trafficChart.options.plugins.tooltip.callbacks.label = function(context) {
+        const label = context.label || '';
+        const value = context.parsed;
+        const total = breakdown.total;
+        const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+        return label + ': ' + value.toLocaleString() + ' (' + percentage + '%)';
+      };
+      
+      trafficChart.update('none'); // 'none' for no animation
+      
+      // Update the summary text below the pie chart
+      const summaryDiv = document.querySelector('#trafficChart').parentElement.querySelector('.mt-4 .flex');
+      if (summaryDiv) {
+        summaryDiv.innerHTML = `
+          <span class="flex items-center">
+            <span class="w-3 h-3 bg-green-500 rounded-full mr-2"></span>
+            Allowed: ${breakdown.allowed.toLocaleString()} (${breakdown.allowed_percentage}%)
+          </span>
+          <span class="flex items-center">
+            <span class="w-3 h-3 bg-red-500 rounded-full mr-2"></span>
+            Blocked: ${breakdown.blocked.toLocaleString()} (${breakdown.blocked_percentage}%) <span class="text-xs">*normalized</span>
+          </span>
+        `;
+      }
+    }
+    
+    // Update system resources chart
+    if (systemChart && data.system_timeline) {
+      systemChart.data.labels = data.system_timeline.map(item => item.timestamp);
+      systemChart.data.datasets[0].data = data.system_timeline.map(item => item.cpu);
+      systemChart.data.datasets[1].data = data.system_timeline.map(item => item.memory);
+      systemChart.data.datasets[2].data = data.system_timeline.map(item => item.disk);
+      systemChart.data.datasets[3].data = data.system_timeline.map(item => item.network);
+      systemChart.update('none');
+    }
+    
+    // Update system metrics details
+    if (data.system_metrics) {
+      const metrics = data.system_metrics;
+      
+      // Update CPU details
+      const cpuSection = document.querySelector('.bg-blue-50');
+      if (cpuSection) {
+        cpuSection.innerHTML = `
+          <div class="text-blue-700 font-semibold text-lg mb-2">🔷 CPU</div>
+          <div class="space-y-1 text-sm">
+            <div class="flex justify-between">
+              <span class="text-gray-600">Usage:</span>
+              <span class="font-bold text-blue-600">${metrics.cpu}%</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">Cores:</span>
+              <span class="font-medium">${metrics.cpu_cores}</span>
+            </div>
+            ${metrics.cpu_freq > 0 ? `
+            <div class="flex justify-between">
+              <span class="text-gray-600">Frequency:</span>
+              <span class="font-medium">${metrics.cpu_freq} MHz</span>
+            </div>
+            ` : ''}
+            <div class="flex justify-between">
+              <span class="text-gray-600">Load Avg:</span>
+              <span class="font-medium">${metrics.cpu_load_1}</span>
+            </div>
+            <div class="flex justify-between text-xs text-gray-500">
+              <span>5m/15m:</span>
+              <span>${metrics.cpu_load_5}/${metrics.cpu_load_15}</span>
+            </div>
+          </div>
+        `;
+      }
+      
+      // Update Memory details
+      const memorySection = document.querySelector('.bg-green-50');
+      if (memorySection) {
+        memorySection.innerHTML = `
+          <div class="text-green-700 font-semibold text-lg mb-2">🟢 Memory</div>
+          <div class="space-y-1 text-sm">
+            <div class="flex justify-between">
+              <span class="text-gray-600">Usage:</span>
+              <span class="font-bold text-green-600">${metrics.memory}%</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">Total:</span>
+              <span class="font-medium">${metrics.memory_total_mb.toLocaleString()} MB</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">Used:</span>
+              <span class="font-medium text-red-600">${metrics.memory_used_mb.toLocaleString()} MB</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">Free:</span>
+              <span class="font-medium text-green-600">${metrics.memory_free_mb.toLocaleString()} MB</span>
+            </div>
+            <div class="flex justify-between text-xs text-gray-500">
+              <span>Buffers/Cache:</span>
+              <span>${metrics.memory_buffers_mb.toLocaleString()}/${metrics.memory_cached_mb.toLocaleString()} MB</span>
+            </div>
+          </div>
+        `;
+      }
+      
+      // Update Disk details
+      const diskSection = document.querySelector('.bg-yellow-50');
+      if (diskSection) {
+        diskSection.innerHTML = `
+          <div class="text-yellow-700 font-semibold text-lg mb-2">💾 Disk</div>
+          <div class="space-y-1 text-sm">
+            <div class="flex justify-between">
+              <span class="text-gray-600">Usage:</span>
+              <span class="font-bold text-yellow-600">${metrics.disk}%</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">Total:</span>
+              <span class="font-medium">${metrics.disk_total_gb} GB</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">Used:</span>
+              <span class="font-medium text-red-600">${metrics.disk_used_gb} GB</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">Free:</span>
+              <span class="font-medium text-green-600">${metrics.disk_free_gb} GB</span>
+            </div>
+            <div class="flex justify-between text-xs text-gray-500">
+              <span>I/O Total:</span>
+              <span>${(metrics.disk_read_mb + metrics.disk_write_mb).toFixed(1)} MB</span>
+            </div>
+          </div>
+        `;
+      }
+      
+      // Update Network & System details
+      const networkSection = document.querySelector('.bg-purple-50');
+      if (networkSection) {
+        networkSection.innerHTML = `
+          <div class="text-purple-700 font-semibold text-lg mb-2">🌐 Network & System</div>
+          <div class="space-y-1 text-sm">
+            <div class="flex justify-between">
+              <span class="text-gray-600">Activity:</span>
+              <span class="font-bold text-purple-600">${metrics.network}%</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">RX Total:</span>
+              <span class="font-medium">${metrics.network_rx_mb} MB</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">TX Total:</span>
+              <span class="font-medium">${metrics.network_tx_mb} MB</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">Uptime:</span>
+              <span class="font-medium text-blue-600">${metrics.uptime}</span>
+            </div>
+          </div>
+        `;
+      }
+      
+      // Update Disk I/O Statistics
+      const diskIOSection = document.querySelector('.bg-gray-50 .grid');
+      if (diskIOSection) {
+        diskIOSection.innerHTML = `
+          <div class="text-center">
+            <div class="text-gray-600">Read Operations</div>
+            <div class="font-bold text-blue-600">${metrics.disk_read_ops.toLocaleString()}</div>
+          </div>
+          <div class="text-center">
+            <div class="text-gray-600">Write Operations</div>
+            <div class="font-bold text-red-600">${metrics.disk_write_ops.toLocaleString()}</div>
+          </div>
+          <div class="text-center">
+            <div class="text-gray-600">Data Read</div>
+            <div class="font-bold text-green-600">${metrics.disk_read_mb} MB</div>
+          </div>
+          <div class="text-center">
+            <div class="text-gray-600">Data Written</div>
+            <div class="font-bold text-orange-600">${metrics.disk_write_mb} MB</div>
+          </div>
+        `;
+      }
+    }
+    
+    // Update top hosts table
+    if (data.top_hosts) {
+      const topHostsTable = document.querySelector('#topHostsTable tbody');
+      if (topHostsTable) {
+        topHostsTable.innerHTML = data.top_hosts.map(host => `
+          <tr>
+            <td class="px-4 py-2">${host.hostname}</td>
+            <td class="px-4 py-2">${host.cnt.toLocaleString()}</td>
+          </tr>
+        `).join('');
+      }
+    }
+    
+    // Update last refresh time indicator (add a small indicator)
+    const timeIndicator = document.getElementById('last-refresh') || (() => {
+      const indicator = document.createElement('div');
+      indicator.id = 'last-refresh';
+      indicator.className = 'fixed top-4 right-4 bg-green-100 text-green-800 px-3 py-1 rounded-full text-xs font-medium shadow-lg z-50';
+      document.body.appendChild(indicator);
+      return indicator;
+    })();
+    timeIndicator.textContent = `Live • ${new Date().toLocaleTimeString()}`;
+    timeIndicator.classList.remove('bg-red-100', 'text-red-800');
+    timeIndicator.classList.add('bg-green-100', 'text-green-800');
+    
+  } catch (error) {
+    console.error('Error updating real-time data:', error);
+    
+    // Show error indicator
+    const timeIndicator = document.getElementById('last-refresh');
+    if (timeIndicator) {
+      timeIndicator.textContent = `Error • ${new Date().toLocaleTimeString()}`;
+      timeIndicator.classList.remove('bg-green-100', 'text-green-800');
+      timeIndicator.classList.add('bg-red-100', 'text-red-800');
+    }
+  }
+}
+
+// Start real-time updates every 2 seconds
+setInterval(updateChartsRealtime, 2000);
+
+// Initial update after 2 seconds to show it's working
+setTimeout(updateChartsRealtime, 2000);
 </script>
 
 </body>

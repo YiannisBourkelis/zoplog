@@ -1,0 +1,310 @@
+<?php
+// api/realtime_data.php - Real-time data API for complete dashboard
+header('Content-Type: application/json');
+
+$mysqli = new mysqli("localhost", "root", "8888", "logs_db");
+if ($mysqli->connect_error) {
+    http_response_code(500);
+    echo json_encode(["error" => $mysqli->connect_error]);
+    exit;
+}
+
+// System Resources Monitoring Function
+function getSystemMetrics() {
+    $metrics = [];
+    
+    // CPU Usage and Details
+    $load = sys_getloadavg();
+    $cpuCores = (int)shell_exec('nproc') ?: 1;
+    $cpuUsage = min(100, ($load[0] / $cpuCores) * 100);
+    $metrics['cpu'] = round($cpuUsage, 1);
+    $metrics['cpu_cores'] = $cpuCores;
+    $metrics['cpu_load_1'] = round($load[0], 2);
+    $metrics['cpu_load_5'] = round($load[1], 2);
+    $metrics['cpu_load_15'] = round($load[2], 2);
+    
+    // CPU frequency (if available)
+    $cpuFreq = @file_get_contents('/proc/cpuinfo');
+    if ($cpuFreq && preg_match('/cpu MHz\s*:\s*([\d.]+)/', $cpuFreq, $matches)) {
+        $metrics['cpu_freq'] = round($matches[1], 0);
+    } else {
+        $metrics['cpu_freq'] = 0;
+    }
+    
+    // Memory Usage with detailed info
+    $memInfo = file_get_contents('/proc/meminfo');
+    preg_match('/MemTotal:\s+(\d+)/', $memInfo, $memTotal);
+    preg_match('/MemAvailable:\s+(\d+)/', $memInfo, $memAvailable);
+    preg_match('/MemFree:\s+(\d+)/', $memInfo, $memFree);
+    preg_match('/Buffers:\s+(\d+)/', $memInfo, $buffers);
+    preg_match('/Cached:\s+(\d+)/', $memInfo, $cached);
+    
+    if ($memTotal && $memAvailable) {
+        $totalMem = $memTotal[1]; // KB
+        $availableMem = $memAvailable[1]; // KB
+        $usedMem = $totalMem - $availableMem;
+        $memUsage = ($usedMem / $totalMem) * 100;
+        
+        $metrics['memory'] = round($memUsage, 1);
+        $metrics['memory_total_mb'] = round($totalMem / 1024, 0);
+        $metrics['memory_used_mb'] = round($usedMem / 1024, 0);
+        $metrics['memory_free_mb'] = round($availableMem / 1024, 0);
+        $metrics['memory_buffers_mb'] = round(($buffers[1] ?? 0) / 1024, 0);
+        $metrics['memory_cached_mb'] = round(($cached[1] ?? 0) / 1024, 0);
+    } else {
+        $metrics['memory'] = 0;
+        $metrics['memory_total_mb'] = 0;
+        $metrics['memory_used_mb'] = 0;
+        $metrics['memory_free_mb'] = 0;
+        $metrics['memory_buffers_mb'] = 0;
+        $metrics['memory_cached_mb'] = 0;
+    }
+    
+    // Disk Usage with detailed info (root filesystem where DB is located)
+    $diskTotal = disk_total_space('/');
+    $diskFree = disk_free_space('/');
+    if ($diskTotal && $diskFree) {
+        $diskUsed = $diskTotal - $diskFree;
+        $diskUsage = ($diskUsed / $diskTotal) * 100;
+        
+        $metrics['disk'] = round($diskUsage, 1);
+        $metrics['disk_total_gb'] = round($diskTotal / (1024*1024*1024), 1);
+        $metrics['disk_used_gb'] = round($diskUsed / (1024*1024*1024), 1);
+        $metrics['disk_free_gb'] = round($diskFree / (1024*1024*1024), 1);
+    } else {
+        $metrics['disk'] = 0;
+        $metrics['disk_total_gb'] = 0;
+        $metrics['disk_used_gb'] = 0;
+        $metrics['disk_free_gb'] = 0;
+    }
+    
+    // Disk I/O Statistics
+    $diskStats = @file_get_contents('/proc/diskstats');
+    $metrics['disk_read_ops'] = 0;
+    $metrics['disk_write_ops'] = 0;
+    $metrics['disk_read_mb'] = 0;
+    $metrics['disk_write_mb'] = 0;
+    
+    if ($diskStats) {
+        $lines = explode("\n", $diskStats);
+        foreach ($lines as $line) {
+            $parts = preg_split('/\s+/', trim($line));
+            if (count($parts) >= 14) {
+                $device = $parts[2];
+                // Look for main disk devices (sda, nvme0n1, etc.) - exclude partitions and loop devices
+                if (preg_match('/^(sda|sdb|sdc|nvme\d+n\d+|vda|hda)$/', $device)) {
+                    $metrics['disk_read_ops'] += (int)$parts[3];
+                    $metrics['disk_write_ops'] += (int)$parts[7];
+                    $metrics['disk_read_mb'] += round(((int)$parts[5] * 512) / (1024*1024), 1);
+                    $metrics['disk_write_mb'] += round(((int)$parts[9] * 512) / (1024*1024), 1);
+                }
+            }
+        }
+    }
+    
+    // Network Usage (approximate based on interface stats)
+    $netStats = @file_get_contents('/proc/net/dev');
+    $networkUsage = 0;
+    $metrics['network_rx_mb'] = 0;
+    $metrics['network_tx_mb'] = 0;
+    
+    if ($netStats) {
+        $lines = explode("\n", $netStats);
+        $totalBytes = 0;
+        $interfaces = 0;
+        foreach ($lines as $line) {
+            if (strpos($line, ':') !== false && !preg_match('/lo:|virbr|docker/', $line)) {
+                $parts = preg_split('/\s+/', trim(substr($line, strpos($line, ':') + 1)));
+                if (count($parts) >= 9) {
+                    $rxBytes = (int)$parts[0];
+                    $txBytes = (int)$parts[8];
+                    $metrics['network_rx_mb'] += round($rxBytes / (1024*1024), 1);
+                    $metrics['network_tx_mb'] += round($txBytes / (1024*1024), 1);
+                    $totalBytes += $rxBytes + $txBytes;
+                    $interfaces++;
+                }
+            }
+        }
+        // Estimate network usage as percentage (very rough approximation)
+        if ($interfaces > 0 && $totalBytes > 0) {
+            // Use fmod for float modulo to avoid implicit float->int conversion deprecation
+            $networkUsage = min(100.0, fmod(($totalBytes / (1024*1024*1024)), 100.0)); // Rough estimate without int cast
+        }
+    }
+    $metrics['network'] = round($networkUsage, 1);
+    
+    // System uptime
+    $uptime = @file_get_contents('/proc/uptime');
+    if ($uptime) {
+        $uptimeSeconds = (int)explode(' ', $uptime)[0];
+        $days = floor($uptimeSeconds / 86400);
+        $hours = floor(($uptimeSeconds % 86400) / 3600);
+        $minutes = floor(($uptimeSeconds % 3600) / 60);
+        $metrics['uptime'] = "{$days}d {$hours}h {$minutes}m";
+    } else {
+        $metrics['uptime'] = 'Unknown';
+    }
+    
+    $metrics['timestamp'] = date('H:i');
+    return $metrics;
+}
+
+// Get all summary statistics
+$allowedRes = $mysqli->query("SELECT COUNT(*) AS cnt FROM packet_logs");
+$allowedRequests = $allowedRes->fetch_assoc()["cnt"];
+
+$blockedRes = $mysqli->query("
+    SELECT COUNT(DISTINCT CONCAT(
+        COALESCE(src_ip_id, ''), '-',
+        COALESCE(dst_ip_id, ''), '-', 
+        COALESCE(dst_port, ''), '-',
+        FLOOR(UNIX_TIMESTAMP(event_time) / 30) -- 30-second dedup window
+    )) AS cnt 
+    FROM blocked_events
+");
+$blockedRequests = $blockedRes->fetch_assoc()["cnt"];
+$totalRequests = $allowedRequests + $blockedRequests;
+
+// Unique IPs
+$uniqueRes = $mysqli->query("
+    SELECT COUNT(DISTINCT src_ip_id) + COUNT(DISTINCT dst_ip_id) AS cnt 
+    FROM packet_logs
+");
+$uniqueIPs = $uniqueRes->fetch_assoc()["cnt"];
+
+// Top hosts (last 5)
+$topHostsRes = $mysqli->query("
+    SELECT h.hostname, COUNT(*) AS cnt 
+    FROM packet_logs p
+    LEFT JOIN hostnames h ON p.hostname_id = h.id
+    WHERE h.hostname IS NOT NULL
+    GROUP BY h.hostname
+    ORDER BY cnt DESC
+    LIMIT 5
+");
+$topHosts = [];
+while ($row = $topHostsRes->fetch_assoc()) {
+    $topHosts[] = $row;
+}
+
+// Get allowed requests from packet_logs (last 10 minutes, per minute)
+$allowedTimelineRes = $mysqli->query("
+    SELECT DATE_FORMAT(packet_timestamp, '%H:%i') AS minute, COUNT(*) AS cnt
+    FROM packet_logs
+    WHERE packet_timestamp >= NOW() - INTERVAL 10 MINUTE
+    GROUP BY minute
+    ORDER BY minute ASC
+");
+$allowedTimeline = [];
+while ($row = $allowedTimelineRes->fetch_assoc()) {
+    $allowedTimeline[$row['minute']] = $row['cnt'];
+}
+
+// Get blocked requests from blocked_events (normalized - group similar requests within 30-second windows)
+$blockedTimelineRes = $mysqli->query("
+    SELECT DATE_FORMAT(event_time, '%H:%i') AS minute, 
+           COUNT(DISTINCT CONCAT(
+               COALESCE(src_ip_id, ''), '-',
+               COALESCE(dst_ip_id, ''), '-', 
+               COALESCE(dst_port, ''), '-',
+               FLOOR(UNIX_TIMESTAMP(event_time) / 30) -- 30-second dedup window
+           )) AS cnt
+    FROM blocked_events
+    WHERE event_time >= NOW() - INTERVAL 10 MINUTE
+    GROUP BY minute
+    ORDER BY minute ASC
+");
+$blockedTimeline = [];
+while ($row = $blockedTimelineRes->fetch_assoc()) {
+    $blockedTimeline[$row['minute']] = $row['cnt'];
+}
+
+// Get all unique minutes from both datasets
+$allMinutes = array_unique(array_merge(array_keys($allowedTimeline), array_keys($blockedTimeline)));
+sort($allMinutes);
+
+// Create combined timeline
+$timeline = [];
+foreach ($allMinutes as $minute) {
+    $allowed = $allowedTimeline[$minute] ?? 0;
+    $blocked = $blockedTimeline[$minute] ?? 0;
+    $total = $allowed + $blocked;
+    
+    $timeline[] = [
+        'minute' => $minute,
+        'allowed' => $allowed,
+        'blocked' => $blocked,
+        'total' => $total
+    ];
+}
+
+// If no data in last 10 minutes, create empty timeline to show the graph
+if (empty($timeline)) {
+    $currentTime = time();
+    for ($i = 9; $i >= 0; $i--) {
+        $minute = date('H:i', $currentTime - ($i * 60));
+        $timeline[] = [
+            'minute' => $minute,
+            'allowed' => 0,
+            'blocked' => 0,
+            'total' => 0
+        ];
+    }
+}
+
+// Calculate totals for the last 10 minutes for the pie chart
+$totalAllowed10min = array_sum(array_column($timeline, 'allowed'));
+$totalBlocked10min = array_sum(array_column($timeline, 'blocked'));
+$total10min = $totalAllowed10min + $totalBlocked10min;
+
+// Calculate percentages
+$allowedPercentage = $total10min > 0 ? round(($totalAllowed10min / $total10min) * 100, 1) : 0;
+$blockedPercentage = $total10min > 0 ? round(($totalBlocked10min / $total10min) * 100, 1) : 0;
+
+// Get system metrics
+$systemMetrics = getSystemMetrics();
+
+// Create system timeline for the last 10 minutes (sample data with current values as base)
+$systemTimeline = [];
+$currentTime = time();
+for ($i = 9; $i >= 0; $i--) {
+    $timestamp = date('H:i', $currentTime - ($i * 60));
+    // Generate sample data with some variation around current values
+    $cpuVariation = rand(-10, 10);
+    $memVariation = rand(-5, 5);
+    $diskVariation = rand(-2, 2);
+    $netVariation = rand(-15, 15);
+    
+    $systemTimeline[] = [
+        'timestamp' => $timestamp,
+        'cpu' => max(0, min(100, $systemMetrics['cpu'] + $cpuVariation)),
+        'memory' => max(0, min(100, $systemMetrics['memory'] + $memVariation)),
+        'disk' => max(0, min(100, $systemMetrics['disk'] + $diskVariation)),
+        'network' => max(0, min(100, $systemMetrics['network'] + $netVariation))
+    ];
+}
+
+// Return all the data
+echo json_encode([
+    'summary' => [
+        'total_requests' => $totalRequests,
+        'allowed_requests' => $allowedRequests,
+        'blocked_requests' => $blockedRequests,
+        'unique_ips' => $uniqueIPs
+    ],
+    'timeline' => $timeline,
+    'traffic_breakdown' => [
+        'allowed' => $totalAllowed10min,
+        'blocked' => $totalBlocked10min,
+        'total' => $total10min,
+        'allowed_percentage' => $allowedPercentage,
+        'blocked_percentage' => $blockedPercentage
+    ],
+    'system_metrics' => $systemMetrics,
+    'system_timeline' => $systemTimeline,
+    'top_hosts' => $topHosts,
+    'timestamp' => date('Y-m-d H:i:s')
+]);
+
+$mysqli->close();
+?>
