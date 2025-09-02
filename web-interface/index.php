@@ -132,30 +132,73 @@ $top365 = $mysqli->query("
     LIMIT 200
 ");
 
-// Browser stats
+// Browser stats - detailed categorization
 $uaRes = $mysqli->query("
-    SELECT ua.user_agent
+    SELECT ua.user_agent, COUNT(*) as cnt
     FROM packet_logs p
     JOIN user_agents ua ON p.user_agent_id = ua.id
     WHERE ua.user_agent IS NOT NULL
+    GROUP BY ua.user_agent
+    ORDER BY cnt DESC
 ");
-$browsers = ["Chrome"=>0,"Firefox"=>0,"Safari"=>0,"Edge"=>0,"Opera"=>0,"Other"=>0];
+$detailedBrowsers = [];
 while ($row = $uaRes->fetch_assoc()) {
     $ua = $row["user_agent"];
+    $cnt = $row["cnt"];
     if (!$ua) continue;
-    if (stripos($ua, "chrome") !== false && stripos($ua, "edg") === false) {
-        $browsers["Chrome"]++;
+    
+    $browserName = "Other";
+    if (stripos($ua, "chrome") !== false && stripos($ua, "edg") === false && stripos($ua, "opr") === false) {
+        // Chrome versions
+        if (preg_match('/Chrome\/(\d+)/', $ua, $matches)) {
+            $browserName = "Chrome " . $matches[1];
+        } else {
+            $browserName = "Chrome";
+        }
     } elseif (stripos($ua, "firefox") !== false) {
-        $browsers["Firefox"]++;
+        // Firefox versions
+        if (preg_match('/Firefox\/(\d+)/', $ua, $matches)) {
+            $browserName = "Firefox " . $matches[1];
+        } else {
+            $browserName = "Firefox";
+        }
     } elseif (stripos($ua, "safari") !== false && stripos($ua, "chrome") === false) {
-        $browsers["Safari"]++;
+        // Safari versions
+        if (preg_match('/Version\/(\d+)/', $ua, $matches)) {
+            $browserName = "Safari " . $matches[1];
+        } else {
+            $browserName = "Safari";
+        }
     } elseif (stripos($ua, "edg") !== false) {
-        $browsers["Edge"]++;
+        // Edge versions
+        if (preg_match('/Edg\/(\d+)/', $ua, $matches)) {
+            $browserName = "Edge " . $matches[1];
+        } else {
+            $browserName = "Edge";
+        }
     } elseif (stripos($ua, "opera") !== false || stripos($ua, "opr/") !== false) {
-        $browsers["Opera"]++;
-    } else {
-        $browsers["Other"]++;
+        // Opera versions
+        if (preg_match('/OPR\/(\d+)/', $ua, $matches)) {
+            $browserName = "Opera " . $matches[1];
+        } else {
+            $browserName = "Opera";
+        }
     }
+    
+    if (!isset($detailedBrowsers[$browserName])) {
+        $detailedBrowsers[$browserName] = 0;
+    }
+    $detailedBrowsers[$browserName] += $cnt;
+}
+
+// Sort browsers by count and get top 20
+arsort($detailedBrowsers);
+$topBrowsers = array_slice($detailedBrowsers, 0, 20, true);
+$otherBrowsersCount = array_sum(array_slice($detailedBrowsers, 20));
+
+// Add "Other" category if there are more than 20 browsers
+if ($otherBrowsersCount > 0) {
+    $topBrowsers["Other"] = $otherBrowsersCount;
 }
 
 // Language stats
@@ -281,16 +324,19 @@ $langs = array_slice($langs, 0, 10, true);
       </div>
     </div>
 
-    <!-- Browsers -->
-    <div class="bg-white rounded-2xl shadow p-6 mt-6">
-      <h2 class="text-xl font-semibold mb-4">Browser Usage</h2>
-      <canvas id="browserChart" height="100"></canvas>
-    </div>
+    <!-- Browser and Language Charts -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+      <!-- Browsers -->
+      <div class="bg-white rounded-2xl shadow p-6">
+        <h2 class="text-xl font-semibold mb-4">Browser Usage (Top 20)</h2>
+        <canvas id="browserChart"></canvas>
+      </div>
 
-    <!-- Languages -->
-    <div class="bg-white rounded-2xl shadow p-6 mt-6">
-      <h2 class="text-xl font-semibold mb-4">Top Languages</h2>
-      <canvas id="langChart" height="100"></canvas>
+      <!-- Languages -->
+      <div class="bg-white rounded-2xl shadow p-6">
+        <h2 class="text-xl font-semibold mb-4">Top Languages</h2>
+        <canvas id="langChart"></canvas>
+      </div>
     </div>
   </div>
 
@@ -400,27 +446,84 @@ new Chart(document.getElementById('timelineChart'), {
   }
 });
 
-// Browser chart
-const browserData = <?= json_encode($browsers) ?>;
+// Browser chart (Pie)
+const browserData = <?= json_encode($topBrowsers) ?>;
 new Chart(document.getElementById('browserChart'), {
-  type: 'doughnut',
+  type: 'pie',
   data: {
     labels: Object.keys(browserData),
-    datasets: [{ data: Object.values(browserData) }]
+    datasets: [{
+      data: Object.values(browserData),
+      backgroundColor: [
+        '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#d946ef',
+        '#f97316', '#84cc16', '#06b6d4', '#8b5cf6', '#f59e0b', '#ef4444', '#10b981',
+        '#3b82f6', '#d946ef', '#f97316', '#84cc16', '#06b6d4', '#8b5cf6', '#6b7280'
+      ]
+    }]
+  },
+  options: {
+    responsive: true,
+    plugins: {
+      legend: {
+        position: 'right',
+        labels: {
+          boxWidth: 12,
+          padding: 10,
+          usePointStyle: true
+        }
+      },
+      tooltip: {
+        callbacks: {
+          label: function(context) {
+            const label = context.label || '';
+            const value = context.parsed;
+            const total = Object.values(browserData).reduce((a, b) => a + b, 0);
+            const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+            return label + ': ' + value.toLocaleString() + ' (' + percentage + '%)';
+          }
+        }
+      }
+    }
   }
 });
 
-// Language chart
+// Language chart (Pie)
 const langData = <?= json_encode($langs) ?>;
 new Chart(document.getElementById('langChart'), {
-  type: 'bar',
+  type: 'pie',
   data: {
     labels: Object.keys(langData),
     datasets: [{
-      label: "Top Languages",
       data: Object.values(langData),
-      backgroundColor: '#10b981'
+      backgroundColor: [
+        '#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#d946ef',
+        '#f97316', '#84cc16', '#6b7280'
+      ]
     }]
+  },
+  options: {
+    responsive: true,
+    plugins: {
+      legend: {
+        position: 'right',
+        labels: {
+          boxWidth: 12,
+          padding: 10,
+          usePointStyle: true
+        }
+      },
+      tooltip: {
+        callbacks: {
+          label: function(context) {
+            const label = context.label || '';
+            const value = context.parsed;
+            const total = Object.values(langData).reduce((a, b) => a + b, 0);
+            const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+            return label + ': ' + value.toLocaleString() + ' (' + percentage + '%)';
+          }
+        }
+      }
+    }
   }
 });
 </script>
