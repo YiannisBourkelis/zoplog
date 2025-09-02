@@ -8,9 +8,14 @@ if ($mysqli->connect_error) {
     die("DB Connection failed: " . $mysqli->connect_error);
 }
 
-// Total requests
-$totalRes = $mysqli->query("SELECT COUNT(*) AS cnt FROM packet_logs");
-$totalRequests = $totalRes->fetch_assoc()["cnt"];
+// Total requests (allowed + blocked)
+$allowedRes = $mysqli->query("SELECT COUNT(*) AS cnt FROM packet_logs");
+$allowedRequests = $allowedRes->fetch_assoc()["cnt"];
+
+$blockedRes = $mysqli->query("SELECT COUNT(*) AS cnt FROM blocked_events");
+$blockedRequests = $blockedRes->fetch_assoc()["cnt"];
+
+$totalRequests = $allowedRequests + $blockedRequests;
 
 // Unique IPs
 $uniqueRes = $mysqli->query("
@@ -34,29 +39,74 @@ while ($row = $topHostsRes->fetch_assoc()) {
     $topHosts[] = $row;
 }
 
-// Requests by method
-$methodsRes = $mysqli->query("
-    SELECT method, COUNT(*) AS cnt
-    FROM packet_logs
-    GROUP BY method
-");
-$methods = [];
-while ($row = $methodsRes->fetch_assoc()) {
-    $methods[$row["method"]] = $row["cnt"];
-}
-
 // Requests over time (last 10 minutes, per minute)
-$timelineRes = $mysqli->query("
+// Get allowed requests from packet_logs
+$allowedTimelineRes = $mysqli->query("
     SELECT DATE_FORMAT(packet_timestamp, '%H:%i') AS minute, COUNT(*) AS cnt
     FROM packet_logs
     WHERE packet_timestamp >= NOW() - INTERVAL 10 MINUTE
     GROUP BY minute
     ORDER BY minute ASC
 ");
-$timeline = [];
-while ($row = $timelineRes->fetch_assoc()) {
-    $timeline[] = $row;
+$allowedTimeline = [];
+while ($row = $allowedTimelineRes->fetch_assoc()) {
+    $allowedTimeline[$row['minute']] = $row['cnt'];
 }
+
+// Get blocked requests from blocked_events
+$blockedTimelineRes = $mysqli->query("
+    SELECT DATE_FORMAT(event_time, '%H:%i') AS minute, COUNT(*) AS cnt
+    FROM blocked_events
+    WHERE event_time >= NOW() - INTERVAL 10 MINUTE
+    GROUP BY minute
+    ORDER BY minute ASC
+");
+$blockedTimeline = [];
+while ($row = $blockedTimelineRes->fetch_assoc()) {
+    $blockedTimeline[$row['minute']] = $row['cnt'];
+}
+
+// Get all unique minutes from both datasets
+$allMinutes = array_unique(array_merge(array_keys($allowedTimeline), array_keys($blockedTimeline)));
+sort($allMinutes);
+
+// Create combined timeline
+$timeline = [];
+foreach ($allMinutes as $minute) {
+    $allowed = $allowedTimeline[$minute] ?? 0;
+    $blocked = $blockedTimeline[$minute] ?? 0;
+    $total = $allowed + $blocked;
+    
+    $timeline[] = [
+        'minute' => $minute,
+        'allowed' => $allowed,
+        'blocked' => $blocked,
+        'total' => $total
+    ];
+}
+
+// If no data in last 10 minutes, create empty timeline to show the graph
+if (empty($timeline)) {
+    $currentTime = time();
+    for ($i = 9; $i >= 0; $i--) {
+        $minute = date('H:i', $currentTime - ($i * 60));
+        $timeline[] = [
+            'minute' => $minute,
+            'allowed' => 0,
+            'blocked' => 0,
+            'total' => 0
+        ];
+    }
+}
+
+// Calculate totals for the last 10 minutes for the pie chart
+$totalAllowed10min = array_sum(array_column($timeline, 'allowed'));
+$totalBlocked10min = array_sum(array_column($timeline, 'blocked'));
+$total10min = $totalAllowed10min + $totalBlocked10min;
+
+// Calculate percentages
+$allowedPercentage = $total10min > 0 ? round(($totalAllowed10min / $total10min) * 100, 1) : 0;
+$blockedPercentage = $total10min > 0 ? round(($totalBlocked10min / $total10min) * 100, 1) : 0;
 
 // --- NEW STATS ---
 
@@ -145,28 +195,37 @@ $langs = array_slice($langs, 0, 10, true);
         <p class="text-3xl font-bold text-blue-600"><?= number_format($totalRequests) ?></p>
       </div>
       <div class="bg-white rounded-2xl shadow p-6 text-center">
+        <h2 class="text-xl font-semibold">Allowed Requests</h2>
+        <p class="text-3xl font-bold text-green-600"><?= number_format($allowedRequests) ?></p>
+      </div>
+      <div class="bg-white rounded-2xl shadow p-6 text-center">
+        <h2 class="text-xl font-semibold">Blocked Requests</h2>
+        <p class="text-3xl font-bold text-red-600"><?= number_format($blockedRequests) ?></p>
+      </div>
+      <div class="bg-white rounded-2xl shadow p-6 text-center">
         <h2 class="text-xl font-semibold">Unique IPs</h2>
-        <p class="text-3xl font-bold text-green-600"><?= number_format($uniqueIPs) ?></p>
-      </div>
-      <div class="bg-white rounded-2xl shadow p-6 text-center">
-        <h2 class="text-xl font-semibold">Top Host</h2>
-        <p class="text-lg font-bold text-purple-600">
-          <?= $topHosts[0]["hostname"] ?? "N/A" ?>
-        </p>
-        <p class="text-gray-600"><?= $topHosts[0]["cnt"] ?? 0 ?> requests</p>
-      </div>
-      <div class="bg-white rounded-2xl shadow p-6 text-center">
-        <h2 class="text-xl font-semibold">Monitoring</h2>
-        <p class="text-lg text-gray-600">Live network stats</p>
+        <p class="text-3xl font-bold text-purple-600"><?= number_format($uniqueIPs) ?></p>
       </div>
     </div>
 
     <!-- Charts grid -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <!-- Methods pie chart -->
+      <!-- Traffic breakdown pie chart -->
       <div class="bg-white rounded-2xl shadow p-6">
-        <h2 class="text-xl font-semibold mb-4">Requests by Method</h2>
-        <canvas id="methodsChart"></canvas>
+        <h2 class="text-xl font-semibold mb-4">Traffic Breakdown (Last 10 min)</h2>
+        <canvas id="trafficChart"></canvas>
+        <div class="mt-4 text-center text-sm text-gray-600">
+          <div class="flex justify-center space-x-4">
+            <span class="flex items-center">
+              <span class="w-3 h-3 bg-green-500 rounded-full mr-2"></span>
+              Allowed: <?= number_format($totalAllowed10min) ?> (<?= $allowedPercentage ?>%)
+            </span>
+            <span class="flex items-center">
+              <span class="w-3 h-3 bg-red-500 rounded-full mr-2"></span>
+              Blocked: <?= number_format($totalBlocked10min) ?> (<?= $blockedPercentage ?>%)
+            </span>
+          </div>
+        </div>
       </div>
 
       <!-- Timeline chart -->
@@ -236,33 +295,109 @@ $langs = array_slice($langs, 0, 10, true);
   </div>
 
 <script>
-// Requests by Method (Pie Chart)
-const methodsData = {
-  labels: <?= json_encode(array_keys($methods)) ?>,
+// Traffic Breakdown Pie Chart (Last 10 min)
+const trafficData = {
+  labels: ['Allowed Requests', 'Blocked Requests'],
   datasets: [{
-    data: <?= json_encode(array_values($methods)) ?>,
-    backgroundColor: ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#d946ef']
+    data: [<?= $totalAllowed10min ?>, <?= $totalBlocked10min ?>],
+    backgroundColor: ['#10b981', '#ef4444'],
+    borderColor: ['#059669', '#dc2626'],
+    borderWidth: 2
   }]
 };
-new Chart(document.getElementById('methodsChart'), {
+new Chart(document.getElementById('trafficChart'), {
   type: 'pie',
-  data: methodsData
+  data: trafficData,
+  options: {
+    responsive: true,
+    plugins: {
+      legend: {
+        position: 'bottom',
+        labels: {
+          padding: 20,
+          usePointStyle: true
+        }
+      },
+      title: {
+        display: true,
+        text: 'Firewall Protection Overview'
+      },
+      tooltip: {
+        callbacks: {
+          label: function(context) {
+            const label = context.label || '';
+            const value = context.parsed;
+            const total = <?= $total10min ?>;
+            const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+            return label + ': ' + value.toLocaleString() + ' (' + percentage + '%)';
+          }
+        }
+      }
+    }
+  }
 });
 
 // Requests over Time (Line Chart)
 const timelineData = {
   labels: <?= json_encode(array_column($timeline, "minute")) ?>,
-  datasets: [{
-    label: 'Requests',
-    data: <?= json_encode(array_column($timeline, "cnt")) ?>,
-    borderColor: '#3b82f6',
-    fill: false,
-    tension: 0.3
-  }]
+  datasets: [
+    {
+      label: 'Allowed Requests',
+      data: <?= json_encode(array_column($timeline, "allowed")) ?>,
+      borderColor: '#10b981',
+      backgroundColor: 'rgba(16, 185, 129, 0.1)',
+      fill: false,
+      tension: 0.3
+    },
+    {
+      label: 'Blocked Requests',
+      data: <?= json_encode(array_column($timeline, "blocked")) ?>,
+      borderColor: '#ef4444',
+      backgroundColor: 'rgba(239, 68, 68, 0.1)',
+      fill: false,
+      tension: 0.3
+    },
+    {
+      label: 'Total Requests',
+      data: <?= json_encode(array_column($timeline, "total")) ?>,
+      borderColor: '#3b82f6',
+      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+      fill: false,
+      tension: 0.3,
+      borderDash: [5, 5]
+    }
+  ]
 };
 new Chart(document.getElementById('timelineChart'), {
   type: 'line',
-  data: timelineData
+  data: timelineData,
+  options: {
+    responsive: true,
+    plugins: {
+      legend: {
+        position: 'top',
+      },
+      title: {
+        display: true,
+        text: 'Network Traffic Over Time'
+      }
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        title: {
+          display: true,
+          text: 'Number of Requests'
+        }
+      },
+      x: {
+        title: {
+          display: true,
+          text: 'Time (HH:MM)'
+        }
+      }
+    }
+  }
 });
 
 // Browser chart
