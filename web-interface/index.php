@@ -274,40 +274,101 @@ $langs = array_slice($langs, 0, 10, true);
 function getSystemMetrics() {
     $metrics = [];
     
-    // CPU Usage
+    // CPU Usage and Details
     $load = sys_getloadavg();
     $cpuCores = (int)shell_exec('nproc') ?: 1;
     $cpuUsage = min(100, ($load[0] / $cpuCores) * 100);
     $metrics['cpu'] = round($cpuUsage, 1);
+    $metrics['cpu_cores'] = $cpuCores;
+    $metrics['cpu_load_1'] = round($load[0], 2);
+    $metrics['cpu_load_5'] = round($load[1], 2);
+    $metrics['cpu_load_15'] = round($load[2], 2);
     
-    // Memory Usage
+    // CPU frequency (if available)
+    $cpuFreq = @file_get_contents('/proc/cpuinfo');
+    if ($cpuFreq && preg_match('/cpu MHz\s*:\s*([\d.]+)/', $cpuFreq, $matches)) {
+        $metrics['cpu_freq'] = round($matches[1], 0);
+    } else {
+        $metrics['cpu_freq'] = 0;
+    }
+    
+    // Memory Usage with detailed info
     $memInfo = file_get_contents('/proc/meminfo');
     preg_match('/MemTotal:\s+(\d+)/', $memInfo, $memTotal);
     preg_match('/MemAvailable:\s+(\d+)/', $memInfo, $memAvailable);
+    preg_match('/MemFree:\s+(\d+)/', $memInfo, $memFree);
+    preg_match('/Buffers:\s+(\d+)/', $memInfo, $buffers);
+    preg_match('/Cached:\s+(\d+)/', $memInfo, $cached);
+    
     if ($memTotal && $memAvailable) {
-        $totalMem = $memTotal[1] * 1024; // Convert to bytes
-        $availableMem = $memAvailable[1] * 1024;
+        $totalMem = $memTotal[1]; // KB
+        $availableMem = $memAvailable[1]; // KB
         $usedMem = $totalMem - $availableMem;
         $memUsage = ($usedMem / $totalMem) * 100;
+        
         $metrics['memory'] = round($memUsage, 1);
+        $metrics['memory_total_mb'] = round($totalMem / 1024, 0);
+        $metrics['memory_used_mb'] = round($usedMem / 1024, 0);
+        $metrics['memory_free_mb'] = round($availableMem / 1024, 0);
+        $metrics['memory_buffers_mb'] = round(($buffers[1] ?? 0) / 1024, 0);
+        $metrics['memory_cached_mb'] = round(($cached[1] ?? 0) / 1024, 0);
     } else {
         $metrics['memory'] = 0;
+        $metrics['memory_total_mb'] = 0;
+        $metrics['memory_used_mb'] = 0;
+        $metrics['memory_free_mb'] = 0;
+        $metrics['memory_buffers_mb'] = 0;
+        $metrics['memory_cached_mb'] = 0;
     }
     
-    // Disk Usage (root filesystem)
+    // Disk Usage with detailed info (root filesystem where DB is located)
     $diskTotal = disk_total_space('/');
     $diskFree = disk_free_space('/');
     if ($diskTotal && $diskFree) {
         $diskUsed = $diskTotal - $diskFree;
         $diskUsage = ($diskUsed / $diskTotal) * 100;
+        
         $metrics['disk'] = round($diskUsage, 1);
+        $metrics['disk_total_gb'] = round($diskTotal / (1024*1024*1024), 1);
+        $metrics['disk_used_gb'] = round($diskUsed / (1024*1024*1024), 1);
+        $metrics['disk_free_gb'] = round($diskFree / (1024*1024*1024), 1);
     } else {
         $metrics['disk'] = 0;
+        $metrics['disk_total_gb'] = 0;
+        $metrics['disk_used_gb'] = 0;
+        $metrics['disk_free_gb'] = 0;
+    }
+    
+    // Disk I/O Statistics
+    $diskStats = @file_get_contents('/proc/diskstats');
+    $metrics['disk_read_ops'] = 0;
+    $metrics['disk_write_ops'] = 0;
+    $metrics['disk_read_mb'] = 0;
+    $metrics['disk_write_mb'] = 0;
+    
+    if ($diskStats) {
+        $lines = explode("\n", $diskStats);
+        foreach ($lines as $line) {
+            $parts = preg_split('/\s+/', trim($line));
+            if (count($parts) >= 14) {
+                $device = $parts[2];
+                // Look for main disk devices (sda, nvme0n1, etc.) - exclude partitions and loop devices
+                if (preg_match('/^(sda|sdb|sdc|nvme\d+n\d+|vda|hda)$/', $device)) {
+                    $metrics['disk_read_ops'] += (int)$parts[3];
+                    $metrics['disk_write_ops'] += (int)$parts[7];
+                    $metrics['disk_read_mb'] += round(((int)$parts[5] * 512) / (1024*1024), 1);
+                    $metrics['disk_write_mb'] += round(((int)$parts[9] * 512) / (1024*1024), 1);
+                }
+            }
+        }
     }
     
     // Network Usage (approximate based on interface stats)
     $netStats = @file_get_contents('/proc/net/dev');
     $networkUsage = 0;
+    $metrics['network_rx_mb'] = 0;
+    $metrics['network_tx_mb'] = 0;
+    
     if ($netStats) {
         $lines = explode("\n", $netStats);
         $totalBytes = 0;
@@ -318,18 +379,32 @@ function getSystemMetrics() {
                 if (count($parts) >= 9) {
                     $rxBytes = (int)$parts[0];
                     $txBytes = (int)$parts[8];
+                    $metrics['network_rx_mb'] += round($rxBytes / (1024*1024), 1);
+                    $metrics['network_tx_mb'] += round($txBytes / (1024*1024), 1);
                     $totalBytes += $rxBytes + $txBytes;
                     $interfaces++;
                 }
             }
         }
-    // Estimate network usage as percentage (very rough approximation)
-    if ($interfaces > 0 && $totalBytes > 0) {
-      // Use fmod for float modulo to avoid implicit float->int conversion deprecation
-      $networkUsage = min(100.0, fmod(($totalBytes / (1024*1024*1024)), 100.0)); // Rough estimate without int cast
-    }
+        // Estimate network usage as percentage (very rough approximation)
+        if ($interfaces > 0 && $totalBytes > 0) {
+            // Use fmod for float modulo to avoid implicit float->int conversion deprecation
+            $networkUsage = min(100.0, fmod(($totalBytes / (1024*1024*1024)), 100.0)); // Rough estimate without int cast
+        }
     }
     $metrics['network'] = round($networkUsage, 1);
+    
+    // System uptime
+    $uptime = @file_get_contents('/proc/uptime');
+    if ($uptime) {
+        $uptimeSeconds = (int)explode(' ', $uptime)[0];
+        $days = floor($uptimeSeconds / 86400);
+        $hours = floor(($uptimeSeconds % 86400) / 3600);
+        $minutes = floor(($uptimeSeconds % 3600) / 60);
+        $metrics['uptime'] = "{$days}d {$hours}h {$minutes}m";
+    } else {
+        $metrics['uptime'] = 'Unknown';
+    }
     
     $metrics['timestamp'] = date('H:i');
     return $metrics;
@@ -426,22 +501,139 @@ for ($i = 9; $i >= 0; $i--) {
     <div class="bg-white rounded-2xl shadow p-6 mt-6">
       <h2 class="text-xl font-semibold mb-4">System Resources (Last 10 min)</h2>
       <canvas id="systemChart"></canvas>
-      <div class="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-center text-sm">
-        <div class="bg-gray-50 rounded-lg p-3">
-          <div class="text-blue-600 font-semibold">CPU</div>
-          <div class="text-lg font-bold"><?= $currentMetrics['cpu'] ?>%</div>
+      
+      <!-- Detailed System Information Grid -->
+      <div class="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <!-- CPU Details -->
+        <div class="bg-blue-50 rounded-lg p-4">
+          <div class="text-blue-700 font-semibold text-lg mb-2">🔷 CPU</div>
+          <div class="space-y-1 text-sm">
+            <div class="flex justify-between">
+              <span class="text-gray-600">Usage:</span>
+              <span class="font-bold text-blue-600"><?= $currentMetrics['cpu'] ?>%</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">Cores:</span>
+              <span class="font-medium"><?= $currentMetrics['cpu_cores'] ?></span>
+            </div>
+            <?php if ($currentMetrics['cpu_freq'] > 0): ?>
+            <div class="flex justify-between">
+              <span class="text-gray-600">Frequency:</span>
+              <span class="font-medium"><?= $currentMetrics['cpu_freq'] ?> MHz</span>
+            </div>
+            <?php endif; ?>
+            <div class="flex justify-between">
+              <span class="text-gray-600">Load Avg:</span>
+              <span class="font-medium"><?= $currentMetrics['cpu_load_1'] ?></span>
+            </div>
+            <div class="flex justify-between text-xs text-gray-500">
+              <span>5m/15m:</span>
+              <span><?= $currentMetrics['cpu_load_5'] ?>/<?= $currentMetrics['cpu_load_15'] ?></span>
+            </div>
+          </div>
         </div>
-        <div class="bg-gray-50 rounded-lg p-3">
-          <div class="text-green-600 font-semibold">Memory</div>
-          <div class="text-lg font-bold"><?= $currentMetrics['memory'] ?>%</div>
+
+        <!-- Memory Details -->
+        <div class="bg-green-50 rounded-lg p-4">
+          <div class="text-green-700 font-semibold text-lg mb-2">🟢 Memory</div>
+          <div class="space-y-1 text-sm">
+            <div class="flex justify-between">
+              <span class="text-gray-600">Usage:</span>
+              <span class="font-bold text-green-600"><?= $currentMetrics['memory'] ?>%</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">Total:</span>
+              <span class="font-medium"><?= number_format($currentMetrics['memory_total_mb']) ?> MB</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">Used:</span>
+              <span class="font-medium text-red-600"><?= number_format($currentMetrics['memory_used_mb']) ?> MB</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">Free:</span>
+              <span class="font-medium text-green-600"><?= number_format($currentMetrics['memory_free_mb']) ?> MB</span>
+            </div>
+            <div class="flex justify-between text-xs text-gray-500">
+              <span>Buffers/Cache:</span>
+              <span><?= number_format($currentMetrics['memory_buffers_mb']) ?>/<?= number_format($currentMetrics['memory_cached_mb']) ?> MB</span>
+            </div>
+          </div>
         </div>
-        <div class="bg-gray-50 rounded-lg p-3">
-          <div class="text-yellow-600 font-semibold">Disk</div>
-          <div class="text-lg font-bold"><?= $currentMetrics['disk'] ?>%</div>
+
+        <!-- Disk Details -->
+        <div class="bg-yellow-50 rounded-lg p-4">
+          <div class="text-yellow-700 font-semibold text-lg mb-2">💾 Disk</div>
+          <div class="space-y-1 text-sm">
+            <div class="flex justify-between">
+              <span class="text-gray-600">Usage:</span>
+              <span class="font-bold text-yellow-600"><?= $currentMetrics['disk'] ?>%</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">Total:</span>
+              <span class="font-medium"><?= $currentMetrics['disk_total_gb'] ?> GB</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">Used:</span>
+              <span class="font-medium text-red-600"><?= $currentMetrics['disk_used_gb'] ?> GB</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">Free:</span>
+              <span class="font-medium text-green-600"><?= $currentMetrics['disk_free_gb'] ?> GB</span>
+            </div>
+            <div class="flex justify-between text-xs text-gray-500">
+              <span>I/O Total:</span>
+              <span><?= $currentMetrics['disk_read_mb'] + $currentMetrics['disk_write_mb'] ?> MB</span>
+            </div>
+          </div>
         </div>
-        <div class="bg-gray-50 rounded-lg p-3">
-          <div class="text-purple-600 font-semibold">Network</div>
-          <div class="text-lg font-bold"><?= $currentMetrics['network'] ?>%</div>
+
+        <!-- Network & System Details -->
+        <div class="bg-purple-50 rounded-lg p-4">
+          <div class="text-purple-700 font-semibold text-lg mb-2">🌐 Network & System</div>
+          <div class="space-y-1 text-sm">
+            <div class="flex justify-between">
+              <span class="text-gray-600">Activity:</span>
+              <span class="font-bold text-purple-600"><?= $currentMetrics['network'] ?>%</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">RX Total:</span>
+              <span class="font-medium"><?= $currentMetrics['network_rx_mb'] ?> MB</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">TX Total:</span>
+              <span class="font-medium"><?= $currentMetrics['network_tx_mb'] ?> MB</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">Uptime:</span>
+              <span class="font-medium text-blue-600"><?= $currentMetrics['uptime'] ?></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Disk I/O Statistics -->
+      <div class="mt-4 bg-gray-50 rounded-lg p-4">
+        <h3 class="font-semibold text-gray-700 mb-3">💿 Disk I/O Statistics</h3>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+          <div class="text-center">
+            <div class="text-gray-600">Read Operations</div>
+            <div class="font-bold text-blue-600"><?= number_format($currentMetrics['disk_read_ops']) ?></div>
+          </div>
+          <div class="text-center">
+            <div class="text-gray-600">Write Operations</div>
+            <div class="font-bold text-red-600"><?= number_format($currentMetrics['disk_write_ops']) ?></div>
+          </div>
+          <div class="text-center">
+            <div class="text-gray-600">Data Read</div>
+            <div class="font-bold text-green-600"><?= $currentMetrics['disk_read_mb'] ?> MB</div>
+          </div>
+          <div class="text-center">
+            <div class="text-gray-600">Data Written</div>
+            <div class="font-bold text-orange-600"><?= $currentMetrics['disk_write_mb'] ?> MB</div>
+          </div>
+        </div>
+        <div class="mt-2 text-xs text-gray-500 text-center">
+          <i>Note: Disk I/O values are cumulative since system boot. Real-time rates would require periodic sampling.</i>
         </div>
       </div>
     </div>
