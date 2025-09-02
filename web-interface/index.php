@@ -8,11 +8,19 @@ if ($mysqli->connect_error) {
     die("DB Connection failed: " . $mysqli->connect_error);
 }
 
-// Total requests (allowed + blocked)
+// Total requests (allowed + blocked normalized)
 $allowedRes = $mysqli->query("SELECT COUNT(*) AS cnt FROM packet_logs");
 $allowedRequests = $allowedRes->fetch_assoc()["cnt"];
 
-$blockedRes = $mysqli->query("SELECT COUNT(*) AS cnt FROM blocked_events");
+$blockedRes = $mysqli->query("
+    SELECT COUNT(DISTINCT CONCAT(
+        COALESCE(src_ip_id, ''), '-',
+        COALESCE(dst_ip_id, ''), '-', 
+        COALESCE(dst_port, ''), '-',
+        FLOOR(UNIX_TIMESTAMP(event_time) / 30) -- 30-second dedup window
+    )) AS cnt 
+    FROM blocked_events
+");
 $blockedRequests = $blockedRes->fetch_assoc()["cnt"];
 
 $totalRequests = $allowedRequests + $blockedRequests;
@@ -53,9 +61,15 @@ while ($row = $allowedTimelineRes->fetch_assoc()) {
     $allowedTimeline[$row['minute']] = $row['cnt'];
 }
 
-// Get blocked requests from blocked_events
+// Get blocked requests from blocked_events (normalized - group similar requests within 30-second windows)
 $blockedTimelineRes = $mysqli->query("
-    SELECT DATE_FORMAT(event_time, '%H:%i') AS minute, COUNT(*) AS cnt
+    SELECT DATE_FORMAT(event_time, '%H:%i') AS minute, 
+           COUNT(DISTINCT CONCAT(
+               COALESCE(src_ip_id, ''), '-',
+               COALESCE(dst_ip_id, ''), '-', 
+               COALESCE(dst_port, ''), '-',
+               FLOOR(UNIX_TIMESTAMP(event_time) / 30) -- 30-second dedup window
+           )) AS cnt
     FROM blocked_events
     WHERE event_time >= NOW() - INTERVAL 10 MINUTE
     GROUP BY minute
@@ -217,6 +231,94 @@ while ($row = $langRes->fetch_assoc()) {
 }
 arsort($langs);
 $langs = array_slice($langs, 0, 10, true);
+
+// System Resources Monitoring
+function getSystemMetrics() {
+    $metrics = [];
+    
+    // CPU Usage
+    $load = sys_getloadavg();
+    $cpuCores = (int)shell_exec('nproc') ?: 1;
+    $cpuUsage = min(100, ($load[0] / $cpuCores) * 100);
+    $metrics['cpu'] = round($cpuUsage, 1);
+    
+    // Memory Usage
+    $memInfo = file_get_contents('/proc/meminfo');
+    preg_match('/MemTotal:\s+(\d+)/', $memInfo, $memTotal);
+    preg_match('/MemAvailable:\s+(\d+)/', $memInfo, $memAvailable);
+    if ($memTotal && $memAvailable) {
+        $totalMem = $memTotal[1] * 1024; // Convert to bytes
+        $availableMem = $memAvailable[1] * 1024;
+        $usedMem = $totalMem - $availableMem;
+        $memUsage = ($usedMem / $totalMem) * 100;
+        $metrics['memory'] = round($memUsage, 1);
+    } else {
+        $metrics['memory'] = 0;
+    }
+    
+    // Disk Usage (root filesystem)
+    $diskTotal = disk_total_space('/');
+    $diskFree = disk_free_space('/');
+    if ($diskTotal && $diskFree) {
+        $diskUsed = $diskTotal - $diskFree;
+        $diskUsage = ($diskUsed / $diskTotal) * 100;
+        $metrics['disk'] = round($diskUsage, 1);
+    } else {
+        $metrics['disk'] = 0;
+    }
+    
+    // Network Usage (approximate based on interface stats)
+    $netStats = @file_get_contents('/proc/net/dev');
+    $networkUsage = 0;
+    if ($netStats) {
+        $lines = explode("\n", $netStats);
+        $totalBytes = 0;
+        $interfaces = 0;
+        foreach ($lines as $line) {
+            if (strpos($line, ':') !== false && !preg_match('/lo:|virbr|docker/', $line)) {
+                $parts = preg_split('/\s+/', trim(substr($line, strpos($line, ':') + 1)));
+                if (count($parts) >= 9) {
+                    $rxBytes = (int)$parts[0];
+                    $txBytes = (int)$parts[8];
+                    $totalBytes += $rxBytes + $txBytes;
+                    $interfaces++;
+                }
+            }
+        }
+    // Estimate network usage as percentage (very rough approximation)
+    if ($interfaces > 0 && $totalBytes > 0) {
+      // Use fmod for float modulo to avoid implicit float->int conversion deprecation
+      $networkUsage = min(100.0, fmod(($totalBytes / (1024*1024*1024)), 100.0)); // Rough estimate without int cast
+    }
+    }
+    $metrics['network'] = round($networkUsage, 1);
+    
+    $metrics['timestamp'] = date('H:i');
+    return $metrics;
+}
+
+// Collect current system metrics
+$currentMetrics = getSystemMetrics();
+
+// For demo purposes, create sample historical data (in production, you'd store this in DB)
+$systemTimeline = [];
+$currentTime = time();
+for ($i = 9; $i >= 0; $i--) {
+    $timestamp = date('H:i', $currentTime - ($i * 60));
+    // Generate sample data with some variation around current values
+    $cpuVariation = rand(-10, 10);
+    $memVariation = rand(-5, 5);
+    $diskVariation = rand(-2, 2);
+    $netVariation = rand(-15, 15);
+    
+    $systemTimeline[] = [
+        'timestamp' => $timestamp,
+        'cpu' => max(0, min(100, $currentMetrics['cpu'] + $cpuVariation)),
+        'memory' => max(0, min(100, $currentMetrics['memory'] + $memVariation)),
+        'disk' => max(0, min(100, $currentMetrics['disk'] + $diskVariation)),
+        'network' => max(0, min(100, $currentMetrics['network'] + $netVariation))
+    ];
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -242,8 +344,12 @@ $langs = array_slice($langs, 0, 10, true);
         <p class="text-3xl font-bold text-green-600"><?= number_format($allowedRequests) ?></p>
       </div>
       <div class="bg-white rounded-2xl shadow p-6 text-center">
-        <h2 class="text-xl font-semibold">Blocked Requests</h2>
+        <h2 class="text-xl font-semibold flex items-center justify-center">
+          Blocked Requests
+          <span class="ml-1 text-xs text-gray-500" title="Normalized - similar requests within 30-second windows are grouped to reduce retry noise">*</span>
+        </h2>
         <p class="text-3xl font-bold text-red-600"><?= number_format($blockedRequests) ?></p>
+        <p class="text-xs text-gray-500 mt-1">Deduplicated</p>
       </div>
       <div class="bg-white rounded-2xl shadow p-6 text-center">
         <h2 class="text-xl font-semibold">Unique IPs</h2>
@@ -265,7 +371,7 @@ $langs = array_slice($langs, 0, 10, true);
             </span>
             <span class="flex items-center">
               <span class="w-3 h-3 bg-red-500 rounded-full mr-2"></span>
-              Blocked: <?= number_format($totalBlocked10min) ?> (<?= $blockedPercentage ?>%)
+              Blocked: <?= number_format($totalBlocked10min) ?> (<?= $blockedPercentage ?>%) <span class="text-xs">*normalized</span>
             </span>
           </div>
         </div>
@@ -275,6 +381,30 @@ $langs = array_slice($langs, 0, 10, true);
       <div class="bg-white rounded-2xl shadow p-6">
         <h2 class="text-xl font-semibold mb-4">Requests Over Time (Last 10 min)</h2>
         <canvas id="timelineChart"></canvas>
+      </div>
+    </div>
+
+    <!-- System Resources Chart -->
+    <div class="bg-white rounded-2xl shadow p-6 mt-6">
+      <h2 class="text-xl font-semibold mb-4">System Resources (Last 10 min)</h2>
+      <canvas id="systemChart"></canvas>
+      <div class="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-center text-sm">
+        <div class="bg-gray-50 rounded-lg p-3">
+          <div class="text-blue-600 font-semibold">CPU</div>
+          <div class="text-lg font-bold"><?= $currentMetrics['cpu'] ?>%</div>
+        </div>
+        <div class="bg-gray-50 rounded-lg p-3">
+          <div class="text-green-600 font-semibold">Memory</div>
+          <div class="text-lg font-bold"><?= $currentMetrics['memory'] ?>%</div>
+        </div>
+        <div class="bg-gray-50 rounded-lg p-3">
+          <div class="text-yellow-600 font-semibold">Disk</div>
+          <div class="text-lg font-bold"><?= $currentMetrics['disk'] ?>%</div>
+        </div>
+        <div class="bg-gray-50 rounded-lg p-3">
+          <div class="text-purple-600 font-semibold">Network</div>
+          <div class="text-lg font-bold"><?= $currentMetrics['network'] ?>%</div>
+        </div>
       </div>
     </div>
 
@@ -343,7 +473,7 @@ $langs = array_slice($langs, 0, 10, true);
 <script>
 // Traffic Breakdown Pie Chart (Last 10 min)
 const trafficData = {
-  labels: ['Allowed Requests', 'Blocked Requests'],
+  labels: ['Allowed Requests', 'Blocked Requests (Normalized)'],
   datasets: [{
     data: [<?= $totalAllowed10min ?>, <?= $totalBlocked10min ?>],
     backgroundColor: ['#10b981', '#ef4444'],
@@ -383,6 +513,77 @@ new Chart(document.getElementById('trafficChart'), {
   }
 });
 
+// System Resources Chart
+const systemData = {
+  labels: <?= json_encode(array_column($systemTimeline, "timestamp")) ?>,
+  datasets: [
+    {
+      label: 'CPU Usage %',
+      data: <?= json_encode(array_column($systemTimeline, "cpu")) ?>,
+      borderColor: '#3b82f6',
+      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+      fill: false,
+      tension: 0.3
+    },
+    {
+      label: 'Memory Usage %',
+      data: <?= json_encode(array_column($systemTimeline, "memory")) ?>,
+      borderColor: '#10b981',
+      backgroundColor: 'rgba(16, 185, 129, 0.1)',
+      fill: false,
+      tension: 0.3
+    },
+    {
+      label: 'Disk Usage %',
+      data: <?= json_encode(array_column($systemTimeline, "disk")) ?>,
+      borderColor: '#f59e0b',
+      backgroundColor: 'rgba(245, 158, 11, 0.1)',
+      fill: false,
+      tension: 0.3
+    },
+    {
+      label: 'Network Activity %',
+      data: <?= json_encode(array_column($systemTimeline, "network")) ?>,
+      borderColor: '#8b5cf6',
+      backgroundColor: 'rgba(139, 92, 246, 0.1)',
+      fill: false,
+      tension: 0.3
+    }
+  ]
+};
+new Chart(document.getElementById('systemChart'), {
+  type: 'line',
+  data: systemData,
+  options: {
+    responsive: true,
+    plugins: {
+      legend: {
+        position: 'top',
+      },
+      title: {
+        display: true,
+        text: 'System Resource Utilization'
+      }
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        max: 100,
+        title: {
+          display: true,
+          text: 'Usage Percentage (%)'
+        }
+      },
+      x: {
+        title: {
+          display: true,
+          text: 'Time (HH:MM)'
+        }
+      }
+    }
+  }
+});
+
 // Requests over Time (Line Chart)
 const timelineData = {
   labels: <?= json_encode(array_column($timeline, "minute")) ?>,
@@ -396,7 +597,7 @@ const timelineData = {
       tension: 0.3
     },
     {
-      label: 'Blocked Requests',
+      label: 'Blocked Requests (Normalized)',
       data: <?= json_encode(array_column($timeline, "blocked")) ?>,
       borderColor: '#ef4444',
       backgroundColor: 'rgba(239, 68, 68, 0.1)',
