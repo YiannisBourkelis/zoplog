@@ -256,7 +256,7 @@ setup_python_environment() {
         mysql-connector-python \
         systemd-python
     
-    # Create config.py from template
+    # Create config.py from template  
     if [ ! -f config.py ]; then
         sudo -u "$ZOPLOG_USER" cp config.example.py config.py
         
@@ -266,6 +266,26 @@ setup_python_environment() {
         sed -i "s/'root'/'$DB_USER'/g" config.py
         sed -i "s/'8888'/'$DB_PASS'/g" config.py
     fi
+    
+    # Create updated config.py with system settings support
+    cat > config.py <<EOF
+# --- DB connection settings ---
+DB_CONFIG = {
+    "host": "localhost",
+    "user": "$DB_USER",
+    "password": "$DB_PASS",
+    "database": "$DB_NAME"
+}
+
+# --- System settings ---
+# Default monitoring interface (will be overridden by web settings)
+DEFAULT_MONITOR_INTERFACE = "br-zoplog"
+
+# Settings file path
+SETTINGS_FILE = "/opt/zoplog/settings.json"
+EOF
+    
+    chown "$ZOPLOG_USER:$ZOPLOG_USER" config.py
     
     log_success "Python environment setup completed"
 }
@@ -294,12 +314,131 @@ if (\$mysqli->connect_errno) {
 \$mysqli->set_charset('utf8mb4');
 ?>
 EOF
+
+    # Update config.php with proper database credentials
+    cat > "$WEB_ROOT/config.php" <<EOF
+<?php
+// ZopLog Web Interface Configuration
+
+// Database configuration
+define('DB_HOST', 'localhost');
+define('DB_NAME', '$DB_NAME');
+define('DB_USER', '$DB_USER');
+define('DB_PASS', '$DB_PASS');
+
+// System settings file path
+define('SYSTEM_SETTINGS_FILE', '/opt/zoplog/settings.json');
+
+// Default system settings
+define('DEFAULT_MONITOR_INTERFACE', 'br-zoplog');
+
+/**
+ * Load system settings from JSON file
+ */
+function loadSystemSettings() {
+    \$defaults = [
+        'monitor_interface' => DEFAULT_MONITOR_INTERFACE,
+        'last_updated' => null
+    ];
+    
+    if (file_exists(SYSTEM_SETTINGS_FILE)) {
+        \$content = file_get_contents(SYSTEM_SETTINGS_FILE);
+        if (\$content !== false) {
+            \$settings = json_decode(\$content, true);
+            if (\$settings !== null) {
+                return array_merge(\$defaults, \$settings);
+            }
+        }
+    }
+    return \$defaults;
+}
+
+/**
+ * Save system settings to JSON file
+ */
+function saveSystemSettings(\$settings) {
+    \$settings['last_updated'] = date('Y-m-d H:i:s');
+    
+    \$json = json_encode(\$settings, JSON_PRETTY_PRINT);
+    \$result = file_put_contents(SYSTEM_SETTINGS_FILE, \$json);
+    
+    if (\$result !== false) {
+        // Set proper permissions
+        chmod(SYSTEM_SETTINGS_FILE, 0644);
+        return true;
+    }
+    return false;
+}
+
+// Create a database connection
+try {
+    \$pdo = new PDO("mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4", 
+                   DB_USER, 
+                   DB_PASS,
+                   [
+                       PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                       PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                       PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4"
+                   ]);
+} catch (PDOException \$e) {
+    error_log("Database connection failed: " . \$e->getMessage());
+    echo "Database connection failed. Please check configuration.";
+}
+?>
+EOF
+
+    # Create initial system settings file
+    cat > "$ZOPLOG_HOME/settings.json" <<EOF
+{
+    "monitor_interface": "br-zoplog",
+    "last_updated": "$(date '+%Y-%m-%d %H:%M:%S')"
+}
+EOF
     
     # Set proper permissions
     chown -R www-data:www-data "$WEB_ROOT"
     chmod -R 755 "$WEB_ROOT"
     
+    # Set permissions for settings file
+    chown "$ZOPLOG_USER:www-data" "$ZOPLOG_HOME/settings.json"
+    chmod 664 "$ZOPLOG_HOME/settings.json"
+    
     log_success "Web interface setup completed"
+}
+
+setup_sudoers() {
+    log_info "Setting up sudoers permissions for web interface..."
+    
+    # Create sudoers entry for ZopLog web interface
+    cat > /etc/sudoers.d/zoplog-web <<'EOF'
+# Allow www-data to manage ZopLog services without password
+www-data ALL=(ALL) NOPASSWD: /bin/systemctl restart zoplog-logger
+www-data ALL=(ALL) NOPASSWD: /bin/systemctl restart zoplog-blockreader  
+www-data ALL=(ALL) NOPASSWD: /bin/systemctl start zoplog-logger
+www-data ALL=(ALL) NOPASSWD: /bin/systemctl start zoplog-blockreader
+www-data ALL=(ALL) NOPASSWD: /bin/systemctl stop zoplog-logger
+www-data ALL=(ALL) NOPASSWD: /bin/systemctl stop zoplog-blockreader
+www-data ALL=(ALL) NOPASSWD: /bin/systemctl status zoplog-logger
+www-data ALL=(ALL) NOPASSWD: /bin/systemctl status zoplog-blockreader
+www-data ALL=(ALL) NOPASSWD: /bin/systemctl is-active zoplog-logger
+www-data ALL=(ALL) NOPASSWD: /bin/systemctl is-active zoplog-blockreader
+www-data ALL=(ALL) NOPASSWD: /bin/systemctl is-enabled zoplog-logger
+www-data ALL=(ALL) NOPASSWD: /bin/systemctl is-enabled zoplog-blockreader
+www-data ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u zoplog-logger*
+www-data ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u zoplog-blockreader*
+EOF
+    
+    # Set proper permissions for sudoers file
+    chmod 440 /etc/sudoers.d/zoplog-web
+    
+    # Validate sudoers syntax
+    if ! visudo -c > /dev/null 2>&1; then
+        log_error "Sudoers configuration is invalid. Removing file."
+        rm -f /etc/sudoers.d/zoplog-web
+        return 1
+    fi
+    
+    log_success "Sudoers permissions configured for web service management"
 }
 
 setup_nginx() {
@@ -764,6 +903,7 @@ main() {
     download_zoplog
     setup_python_environment
     setup_web_interface
+    setup_sudoers
     setup_nginx
     setup_scripts
     setup_transparent_proxy

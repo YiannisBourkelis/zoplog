@@ -5,8 +5,10 @@ from scapy.layers.http import HTTPRequest
 from scapy.packet import bind_layers
 from scapy.layers.inet import TCP
 from datetime import datetime
-from config import DB_CONFIG
+from config import DB_CONFIG, DEFAULT_MONITOR_INTERFACE, SETTINGS_FILE
 import subprocess
+import json
+import os
 
 # --- DB driver fallback (mysql-connector or PyMySQL) ---
 try:
@@ -425,12 +427,54 @@ def tcp_packet_handler(packet):
     except Exception:
         pass
 
+def load_system_settings():
+    """Load system settings from file, return defaults if not found"""
+    try:
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"Warning: Could not load settings file: {e}")
+    
+    # Return defaults
+    return {
+        "monitor_interface": DEFAULT_MONITOR_INTERFACE,
+        "last_updated": None
+    }
+
+def get_available_interfaces():
+    """Get list of available network interfaces"""
+    try:
+        interfaces = []
+        result = subprocess.run(['ip', 'link', 'show'], capture_output=True, text=True)
+        for line in result.stdout.split('\n'):
+            if ': ' in line and 'state' in line.lower():
+                interface = line.split(':')[1].strip().split('@')[0]
+                if interface not in ['lo']:  # Skip loopback
+                    interfaces.append(interface)
+        return interfaces
+    except Exception:
+        return ['eth0', 'eth1', 'br-zoplog']  # Fallback defaults
+
 # --- Run ---
 def get_default_interface():
-    try:
-        return scapy.conf.iface
-    except:
-        return 'eth0'
+    """Get the configured monitoring interface from settings"""
+    settings = load_system_settings()
+    interface = settings.get("monitor_interface", DEFAULT_MONITOR_INTERFACE)
+    
+    # Verify interface exists
+    available = get_available_interfaces()
+    if interface not in available:
+        print(f"Warning: Configured interface '{interface}' not found. Available: {available}")
+        # Try bridge interface first, then first available
+        if "br-zoplog" in available:
+            interface = "br-zoplog"
+        elif available:
+            interface = available[0]
+        else:
+            interface = "eth0"  # Last resort
+    
+    return interface
 
 def main():
     interface = get_default_interface()
