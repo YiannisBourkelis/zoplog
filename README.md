@@ -1,66 +1,199 @@
-# Network Logger Application
+# ZopLog - Network Traffic Monitor & Blocker
 
-This project is designed to log network traffic and block unwanted content based on user defined block ists. It consists of a Python-based logger that captures HTTP/HTTPS requests and a PHP-based web interface for displaying the logged data.
+ZopLog is a comprehensive network monitoring and content blocking solution that acts as a transparent proxy between your internet connection and internal network. It captures, analyzes, and blocks network traffic based on user-defined blocklists while providing real-time monitoring through an intuitive web dashboard.
+
+## 🚀 Quick Install
+
+**Requirements:** Fresh Debian-based Linux system with **two ethernet interfaces**
+
+Run this single command to install ZopLog:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/YiannisBourkelis/zoplog/main/install.sh | sudo bash
+```
+
+The installer will:
+- ✅ Set up transparent proxy between your router and internal network
+- ✅ Install and configure all dependencies (Nginx, PHP 8.4, MariaDB, Python)
+- ✅ Create system user and services
+- ✅ Configure database and web interface
+- ✅ Set up firewall integration with nftables
+
+**After installation:** Reboot your system, then access the dashboard at `http://your-server-ip/`
+
+## 🏗️ Architecture
+
+ZopLog works as a network bridge with two ethernet interfaces:
+- **Interface 1**: Connected to your internet router
+- **Interface 2**: Connected to your internal network switch
+- **Traffic Flow**: Internet ← Router ← ZopLog ← Switch ← Your Devices
 
 ## Project Structure
 
 ```
-network-logger
-├── python-logger
-│   ├── logger.py          # Main logic for logging HTTP/HTTPS requests
-│   └── requirements.txt   # Python dependencies for the logger
-├── web-interface
-│   ├── index.php          # Entry point for the web interface
-│   ├── config.php         # Configuration settings for the PHP application
-└── README.md              # Project documentation
+zoplog/
+├── python-logger/
+│   ├── logger.py                    # HTTP/HTTPS packet capture
+│   ├── nft_blocklog_reader.py       # NFTables log processor
+│   └── config.py                    # Database configuration
+├── web-interface/
+│   ├── index.php                    # Real-time dashboard
+│   ├── logger.php                   # Traffic logs viewer
+│   ├── blocklists.php               # Blocklist management
+│   └── api/realtime_data.php        # Dashboard API
+├── scripts/
+│   ├── zoplog-firewall-*            # Firewall management scripts
+│   └── zoplog-nft-*                 # NFTables integration
+└── install.sh                       # Automated installer
 ```
 
-## Setup Instructions
+## Manual Setup Instructions
 
-### Python Logger
+*Only needed if you prefer manual installation over the automated installer*
 
-1. Navigate to the `python-logger` directory.
-2. Install the required dependencies using pip:
-   ```
-   pip install -r requirements.txt
-   ```
-3. Run the logger script:
-   ```
-   python logger.py
-   ```
+### System Requirements
 
-Install the required dependencies
+- Debian-based Linux distribution (Ubuntu, Debian, etc.)
+- Two ethernet interfaces
+- Root access
+- Internet connectivity
 
-For Ubuntu/Debian, run:
+### Dependencies
+
+```bash
+# Update system
+sudo apt update && sudo apt upgrade -y
+
+# Install system dependencies
+sudo apt install -y curl wget git python3 python3-pip python3-venv \
+    python3-systemd python3-scapy nginx mariadb-server php8.4 \
+    php8.4-fpm php8.4-mysql php8.4-cli nftables bridge-utils
+
+# Install Python packages
+pip3 install PyMySQL mysql-connector-python systemd-python scapy
 ```
-sudo apt update
-sudo apt install python3 python3-pip python3-scapy python3-
+
+### Database Setup
+
+```bash
+# Secure MariaDB
+sudo mysql_secure_installation
+
+# Create database
+sudo mysql -u root -p
 ```
 
-### PHP Web Interface
+```sql
+CREATE DATABASE logs_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'zoplog_db'@'localhost' IDENTIFIED BY 'your_secure_password';
+GRANT ALL PRIVILEGES ON logs_db.* TO 'zoplog_db'@'localhost';
+FLUSH PRIVILEGES;
+EXIT;
+```
 
-1. Ensure you have a web server with PHP support (e.g., Apache, Nginx).
-2. Place the `web-interface` directory in your web server's root directory.
-3. Update the `config.php` file with your database connection details.
-4. Access the web interface by navigating to `http://your-server-address/php-web-interface/index.php`.
+### Application Setup
 
-## Usage
+```bash
+# Clone repository
+git clone https://github.com/YiannisBourkelis/zoplog.git
+cd zoplog
 
-- The Python logger will start capturing network traffic and logging the requests to the database.
-- Use the PHP web interface to view the logged data and manage unwanted content.
-- Access the real-time dashboard for live monitoring and analytics.
+# Setup Python environment
+cd python-logger
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 
-## Features
+# Configure database connection
+cp config.example.py config.py
+# Edit config.py with your database credentials
 
-- **Real-time Network Monitoring**: Live dashboard with 2-second updates
-- **Traffic Analysis**: Detailed breakdown of allowed vs blocked requests
-- **System Resource Monitoring**: CPU, memory, disk, and network usage tracking
-- **Interactive Charts**: Visual representation of traffic patterns and system metrics
-- **Blocklist Management**: Web interface for managing content filters
-- **NFTables Integration**: Advanced firewall rule management
-- **RESTful API**: Centralized data access through `/api/realtime_data.php`
+# Setup web interface
+sudo cp -r web-interface/* /var/www/html/
+sudo chown -R www-data:www-data /var/www/html/
+```
 
-## Contributing
+## 🖥️ Usage
+
+### Web Dashboard
+
+After installation, access the web interface:
+
+- **Dashboard**: `http://your-server-ip/` - Real-time network monitoring
+- **Traffic Logs**: `http://your-server-ip/logger.php` - Detailed request logs  
+- **Blocklist Management**: `http://your-server-ip/blocklists.php` - Manage content filters
+- **API Endpoint**: `http://your-server-ip/api/realtime_data.php` - JSON data API
+
+### Command Line Management
+
+```bash
+# Start/stop services
+sudo systemctl start zoplog-logger
+sudo systemctl start zoplog-blockreader
+sudo systemctl stop zoplog-logger
+
+# View logs
+sudo journalctl -u zoplog-logger -f
+sudo journalctl -u zoplog-blockreader -f
+
+# Firewall management
+sudo /usr/local/sbin/zoplog-firewall-apply <blocklist_id>
+sudo /usr/local/sbin/zoplog-firewall-toggle <blocklist_id> active
+sudo /usr/local/sbin/zoplog-firewall-remove <blocklist_id>
+```
+
+### Adding Blocklists
+
+1. Navigate to the Blocklists page in the web interface
+2. Add a blocklist URL (e.g., hosts file format)
+3. Select category and add description
+4. Toggle active/inactive status
+5. Firewall rules are automatically applied
+
+## ⚡ Features
+
+- **🔄 Real-time Network Monitoring**: Live dashboard with 2-second updates
+- **📊 Traffic Analysis**: Detailed breakdown of allowed vs blocked requests
+- **💻 System Resource Monitoring**: CPU, memory, disk, and network usage tracking
+- **📈 Interactive Charts**: Visual representation of traffic patterns and system metrics
+- **🛡️ Blocklist Management**: Web interface for managing content filters
+- **🔥 NFTables Integration**: Advanced firewall rule management with automatic IP blocking
+- **🌉 Transparent Proxy**: Bridge mode operation between router and internal network
+- **🔗 RESTful API**: Centralized data access through `/api/realtime_data.php`
+- **⚡ Auto-blocking**: Automatic IP blocking when domains are resolved
+- **📝 Comprehensive Logging**: HTTP/HTTPS request logging with detailed metadata
+
+## 🔧 System Architecture
+
+```
+Internet ← Router ← [ZopLog Bridge] ← Switch ← Your Devices
+                         │
+                    ┌────┴────┐
+                    │ Packet  │
+                    │ Capture │
+                    └────┬────┘
+                         │
+                    ┌────┴────┐
+                    │ Analysis│
+                    │   &     │
+                    │Blocking │
+                    └────┬────┘
+                         │
+                    ┌────┴────┐
+                    │   Web   │
+                    │Dashboard│
+                    └─────────┘
+```
+
+## 🚨 Security & Performance
+
+- **Minimal Attack Surface**: System user separation and privilege isolation
+- **High Performance**: Optimized packet processing with minimal latency
+- **Resource Efficient**: Low CPU and memory usage
+- **Scalable**: Handles high traffic volumes with database optimization
+- **Secure**: Sandboxed execution and proper input validation
+
+## 🤝 Contributing
 
 We welcome contributions to ZopLog! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details on:
 
@@ -69,16 +202,31 @@ We welcome contributions to ZopLog! Please see our [Contributing Guidelines](CON
 - Copyright assignment requirements
 - Security vulnerability reporting
 
-## License
+## 📄 License
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
 ### Copyright Notice
 
-Copyright 2025 Yiannis Bourkelis. All contributors assign their rights to the project maintainer.
+Copyright 2025 Yiannis. All contributors assign their rights to the project maintainer.
 
-## Support
+## 📞 Support
 
-- Report bugs and request features through GitHub Issues
-- For security vulnerabilities, please contact the maintainer directly
-- Documentation and setup help available in the project wiki
+- **🐛 Bug Reports**: [GitHub Issues](https://github.com/YiannisBourkelis/zoplog/issues)
+- **💡 Feature Requests**: [GitHub Issues](https://github.com/YiannisBourkelis/zoplog/issues)
+- **🔒 Security Issues**: Contact maintainer directly (do not create public issues)
+- **📖 Documentation**: Project README and inline code comments
+- **💬 Community**: GitHub Discussions (coming soon)
+
+## 🙏 Acknowledgments
+
+- Built with modern web technologies (PHP 8.4, Python 3, MariaDB)
+- Uses NFTables for high-performance packet filtering
+- Inspired by network security best practices
+- Community-driven blocklist integration
+
+---
+
+**⭐ Star this project on GitHub if you find it useful!**
+
+**🔗 Repository**: https://github.com/YiannisBourkelis/zoplog

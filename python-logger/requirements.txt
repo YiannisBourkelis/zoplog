@@ -1,0 +1,11 @@
+# ZopLog Python Dependencies
+# Core networking and packet analysis
+scapy>=2.4.5
+PyMySQL>=1.0.2
+mysql-connector-python>=8.0.33
+
+# System integration
+systemd-python>=234
+
+# Optional: Enhanced functionality
+requests>=2.28.0
