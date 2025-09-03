@@ -148,7 +148,6 @@ install_dependencies() {
         php8.4-cli \
         php8.4-common \
         php8.4-curl \
-        php8.4-json \
         php8.4-mbstring \
         php8.4-xml \
         php8.4-zip
