@@ -3,10 +3,8 @@
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
-$mysqli = new mysqli("localhost", "root", "8888", "logs_db");
-if ($mysqli->connect_error) {
-    die("DB Connection failed: " . $mysqli->connect_error);
-}
+// Use centralized DB config/connection
+require_once __DIR__ . '/db.php';
 
 // Total requests (allowed + blocked normalized)
 $allowedRes = $mysqli->query("SELECT COUNT(*) AS cnt FROM packet_logs");

@@ -1,13 +1,8 @@
 <?php
 header("Content-Type: application/json");
 
-// Database connection
-$mysqli = new mysqli("localhost", "root", "8888", "logs_db");
-if ($mysqli->connect_error) {
-    http_response_code(500);
-    echo json_encode(["error" => $mysqli->connect_error]);
-    exit;
-}
+// Database connection via centralized helper
+require_once __DIR__ . '/db.php';
 
 // Get parameters
 $offset = intval($_GET["offset"] ?? 0);

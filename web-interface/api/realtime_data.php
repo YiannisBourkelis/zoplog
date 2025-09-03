@@ -2,12 +2,7 @@
 // api/realtime_data.php - Real-time data API for complete dashboard
 header('Content-Type: application/json');
 
-$mysqli = new mysqli("localhost", "root", "8888", "logs_db");
-if ($mysqli->connect_error) {
-    http_response_code(500);
-    echo json_encode(["error" => $mysqli->connect_error]);
-    exit;
-}
+require_once __DIR__ . '/../db.php';
 
 // System Resources Monitoring Function
 function getSystemMetrics() {
