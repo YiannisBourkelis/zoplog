@@ -530,143 +530,169 @@ EOF
 create_database_schema() {
     log_info "Creating database schema..."
     
-    # Create database tables
+    # Create database tables with proper schema matching the application
     mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" <<'EOF'
--- IP addresses table
-CREATE TABLE IF NOT EXISTS ip_addresses (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    ip_address VARCHAR(45) UNIQUE NOT NULL,
-    INDEX idx_ip (ip_address)
-);
-
--- MAC addresses table
-CREATE TABLE IF NOT EXISTS mac_addresses (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    mac_address VARCHAR(17) UNIQUE NOT NULL,
-    INDEX idx_mac (mac_address)
-);
-
--- Hostnames table
-CREATE TABLE IF NOT EXISTS hostnames (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    hostname VARCHAR(255) UNIQUE NOT NULL,
-    ip_id INT,
-    INDEX idx_hostname (hostname),
-    FOREIGN KEY (ip_id) REFERENCES ip_addresses(id)
-);
-
--- Paths table
-CREATE TABLE IF NOT EXISTS paths (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    path TEXT NOT NULL,
-    path_hash VARCHAR(64) UNIQUE NOT NULL,
-    INDEX idx_path_hash (path_hash)
-);
-
--- User agents table
-CREATE TABLE IF NOT EXISTS user_agents (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    user_agent TEXT NOT NULL,
-    ua_hash VARCHAR(64) UNIQUE NOT NULL,
-    INDEX idx_ua_hash (ua_hash)
-);
+SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
+START TRANSACTION;
+SET time_zone = "+00:00";
 
 -- Accept languages table
-CREATE TABLE IF NOT EXISTS accept_languages (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    accept_language VARCHAR(255) UNIQUE NOT NULL,
-    INDEX idx_lang (accept_language)
-);
+CREATE TABLE IF NOT EXISTS `accept_languages` (
+  `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `accept_language` varchar(255) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `accept_language` (`accept_language`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
--- Main packet logs table
-CREATE TABLE IF NOT EXISTS packet_logs (
-    id BIGINT PRIMARY KEY AUTO_INCREMENT,
-    packet_timestamp TIMESTAMP(3) NOT NULL,
-    src_ip_id INT NOT NULL,
-    src_port SMALLINT UNSIGNED,
-    dst_ip_id INT NOT NULL,
-    dst_port SMALLINT UNSIGNED,
-    src_mac_id INT,
-    dst_mac_id INT,
-    method VARCHAR(10),
-    hostname_id INT,
-    path_id INT,
-    user_agent_id INT,
-    accept_language_id INT,
-    type ENUM('HTTP', 'HTTPS') NOT NULL,
-    INDEX idx_timestamp (packet_timestamp),
-    INDEX idx_src_ip (src_ip_id),
-    INDEX idx_dst_ip (dst_ip_id),
-    INDEX idx_hostname (hostname_id),
-    INDEX idx_type (type),
-    FOREIGN KEY (src_ip_id) REFERENCES ip_addresses(id),
-    FOREIGN KEY (dst_ip_id) REFERENCES ip_addresses(id),
-    FOREIGN KEY (src_mac_id) REFERENCES mac_addresses(id),
-    FOREIGN KEY (dst_mac_id) REFERENCES mac_addresses(id),
-    FOREIGN KEY (hostname_id) REFERENCES hostnames(id),
-    FOREIGN KEY (path_id) REFERENCES paths(id),
-    FOREIGN KEY (user_agent_id) REFERENCES user_agents(id),
-    FOREIGN KEY (accept_language_id) REFERENCES accept_languages(id)
-);
-
--- Blocklists table
-CREATE TABLE IF NOT EXISTS blocklists (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    url VARCHAR(2048) NOT NULL,
-    description TEXT,
-    category VARCHAR(50) NOT NULL,
-    active ENUM('active', 'inactive') DEFAULT 'active',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_active (active),
-    INDEX idx_category (category)
-);
-
--- Blocklist domains table
-CREATE TABLE IF NOT EXISTS blocklist_domains (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    blocklist_id INT NOT NULL,
-    domain VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY unique_blocklist_domain (blocklist_id, domain),
-    INDEX idx_domain (domain),
-    FOREIGN KEY (blocklist_id) REFERENCES blocklists(id) ON DELETE CASCADE
-);
+-- IP addresses table
+CREATE TABLE IF NOT EXISTS `ip_addresses` (
+  `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `ip_address` varchar(45) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_ip_address` (`ip_address`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- Blocked events table
-CREATE TABLE IF NOT EXISTS blocked_events (
-    id BIGINT PRIMARY KEY AUTO_INCREMENT,
-    timestamp TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP(3),
-    direction ENUM('IN', 'OUT') NOT NULL,
-    src_ip_id INT,
-    dst_ip_id INT,
-    src_port SMALLINT UNSIGNED,
-    dst_port SMALLINT UNSIGNED,
-    protocol VARCHAR(10),
-    interface_in VARCHAR(20),
-    interface_out VARCHAR(20),
-    raw_log TEXT,
-    INDEX idx_timestamp (timestamp),
-    INDEX idx_direction (direction),
-    INDEX idx_src_ip (src_ip_id),
-    INDEX idx_dst_ip (dst_ip_id),
-    FOREIGN KEY (src_ip_id) REFERENCES ip_addresses(id),
-    FOREIGN KEY (dst_ip_id) REFERENCES ip_addresses(id)
-);
+CREATE TABLE IF NOT EXISTS `blocked_events` (
+  `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `event_time` datetime NOT NULL DEFAULT current_timestamp(),
+  `direction` enum('IN','OUT') NOT NULL,
+  `src_ip_id` bigint(20) UNSIGNED DEFAULT NULL,
+  `dst_ip_id` bigint(20) UNSIGNED DEFAULT NULL,
+  `src_port` int(11) DEFAULT NULL,
+  `dst_port` int(11) DEFAULT NULL,
+  `proto` varchar(8) DEFAULT NULL,
+  `iface_in` varchar(32) DEFAULT NULL,
+  `iface_out` varchar(32) DEFAULT NULL,
+  `message` text DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_event_time` (`event_time`),
+  KEY `idx_direction` (`direction`),
+  KEY `idx_src_ip` (`src_ip_id`),
+  KEY `idx_dst_ip` (`dst_ip_id`),
+  CONSTRAINT `fk_blocked_events_src_ip` FOREIGN KEY (`src_ip_id`) REFERENCES `ip_addresses` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_blocked_events_dst_ip` FOREIGN KEY (`dst_ip_id`) REFERENCES `ip_addresses` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 
--- Blocked IPs tracking table
-CREATE TABLE IF NOT EXISTS blocked_ips (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    blocklist_domain_id INT NOT NULL,
-    ip_id INT NOT NULL,
-    blocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY unique_domain_ip (blocklist_domain_id, ip_id),
-    FOREIGN KEY (blocklist_domain_id) REFERENCES blocklist_domains(id) ON DELETE CASCADE,
-    FOREIGN KEY (ip_id) REFERENCES ip_addresses(id)
-);
+-- Blocklists table
+CREATE TABLE IF NOT EXISTS `blocklists` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `url` text NOT NULL,
+  `description` text DEFAULT NULL,
+  `category` enum('adware','malware','phishing','cryptomining','tracking','scam','fakenews','gambling','social','porn','streaming','proxyvpn','shopping','hate','other') NOT NULL,
+  `active` enum('active','inactive') NOT NULL DEFAULT 'active',
+  `created_at` datetime NOT NULL,
+  `updated_at` datetime NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
+
+-- Blocklist domains table
+CREATE TABLE IF NOT EXISTS `blocklist_domains` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `blocklist_id` int(11) NOT NULL,
+  `domain` varchar(255) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_blocklist_domain` (`blocklist_id`,`domain`),
+  KEY `idx_blocklist_id` (`blocklist_id`),
+  CONSTRAINT `fk_blocklist_domains_blocklists` FOREIGN KEY (`blocklist_id`) REFERENCES `blocklists` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
+
+-- Blocked IPs table
+CREATE TABLE IF NOT EXISTS `blocked_ips` (
+  `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `blocklist_domain_id` int(11) NOT NULL,
+  `ip_id` bigint(20) UNSIGNED NOT NULL,
+  `first_seen` datetime NOT NULL DEFAULT current_timestamp(),
+  `last_seen` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  `hit_count` int(11) NOT NULL DEFAULT 1,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_blocked_domain_ip` (`blocklist_domain_id`,`ip_id`),
+  KEY `idx_blocked_ips_last_seen` (`last_seen`),
+  KEY `idx_blocked_ips_domain` (`blocklist_domain_id`),
+  KEY `idx_blocked_ips_ip` (`ip_id`),
+  CONSTRAINT `fk_blocked_ips_domain` FOREIGN KEY (`blocklist_domain_id`) REFERENCES `blocklist_domains` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_blocked_ips_ip` FOREIGN KEY (`ip_id`) REFERENCES `ip_addresses` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
+
+-- Hostnames table
+CREATE TABLE IF NOT EXISTS `hostnames` (
+  `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `hostname` varchar(255) NOT NULL,
+  `ip_id` bigint(20) UNSIGNED DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `hostname` (`hostname`),
+  KEY `idx_hostname` (`hostname`),
+  KEY `ip_id` (`ip_id`),
+  CONSTRAINT `hostnames_ibfk_1` FOREIGN KEY (`ip_id`) REFERENCES `ip_addresses` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- MAC addresses table
+CREATE TABLE IF NOT EXISTS `mac_addresses` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `mac_address` varchar(32) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `mac_address` (`mac_address`),
+  KEY `idx_mac_address` (`mac_address`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Paths table
+CREATE TABLE IF NOT EXISTS `paths` (
+  `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `path` text NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_path` (`path`(255))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- User agents table
+CREATE TABLE IF NOT EXISTS `user_agents` (
+  `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_agent` text NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_user_agent` (`user_agent`(255))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Main packet logs table
+CREATE TABLE IF NOT EXISTS `packet_logs` (
+  `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `packet_timestamp` datetime NOT NULL,
+  `src_ip_id` bigint(20) UNSIGNED DEFAULT NULL,
+  `src_port` int(10) UNSIGNED NOT NULL,
+  `dst_ip_id` bigint(20) UNSIGNED DEFAULT NULL,
+  `dst_port` int(10) UNSIGNED NOT NULL,
+  `method` enum('GET','POST','PUT','DELETE','HEAD','OPTIONS','PATCH','N/A','TLS_CLIENTHELLO') DEFAULT 'N/A',
+  `hostname_id` bigint(20) UNSIGNED DEFAULT NULL,
+  `path_id` bigint(20) UNSIGNED DEFAULT NULL,
+  `user_agent_id` bigint(20) UNSIGNED DEFAULT NULL,
+  `accept_language_id` bigint(20) UNSIGNED DEFAULT NULL,
+  `type` enum('HTTP','HTTPS') NOT NULL,
+  `src_mac_id` int(11) DEFAULT NULL,
+  `dst_mac_id` int(11) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_packet_time` (`packet_timestamp`),
+  KEY `idx_src_ip` (`src_ip_id`),
+  KEY `idx_dst_ip` (`dst_ip_id`),
+  KEY `idx_hostname` (`hostname_id`),
+  KEY `idx_path` (`path_id`),
+  KEY `idx_user_agent` (`user_agent_id`),
+  KEY `idx_accept_language` (`accept_language_id`),
+  KEY `idx_method_type` (`method`,`type`),
+  KEY `src_mac_id` (`src_mac_id`),
+  KEY `dst_mac_id` (`dst_mac_id`),
+  KEY `idx_packet_time_type_method` (`packet_timestamp` DESC,`type`,`method`),
+  CONSTRAINT `packet_logs_ibfk_1` FOREIGN KEY (`src_ip_id`) REFERENCES `ip_addresses` (`id`),
+  CONSTRAINT `packet_logs_ibfk_2` FOREIGN KEY (`dst_ip_id`) REFERENCES `ip_addresses` (`id`),
+  CONSTRAINT `packet_logs_ibfk_3` FOREIGN KEY (`hostname_id`) REFERENCES `hostnames` (`id`),
+  CONSTRAINT `packet_logs_ibfk_4` FOREIGN KEY (`path_id`) REFERENCES `paths` (`id`),
+  CONSTRAINT `packet_logs_ibfk_5` FOREIGN KEY (`user_agent_id`) REFERENCES `user_agents` (`id`),
+  CONSTRAINT `packet_logs_ibfk_6` FOREIGN KEY (`accept_language_id`) REFERENCES `accept_languages` (`id`),
+  CONSTRAINT `packet_logs_ibfk_7` FOREIGN KEY (`src_mac_id`) REFERENCES `mac_addresses` (`id`),
+  CONSTRAINT `packet_logs_ibfk_8` FOREIGN KEY (`dst_mac_id`) REFERENCES `mac_addresses` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+COMMIT;
 EOF
     
-    log_success "Database schema created"
+    log_success "Database schema created with proper structure"
 }
 
 show_completion_message() {
