@@ -113,6 +113,14 @@ install_dependencies() {
     apt-get update -qq
     
     log_info "Installing system dependencies..."
+    
+    # Set environment variables to avoid interactive prompts
+    export DEBIAN_FRONTEND=noninteractive
+    
+    # Pre-configure iptables-persistent to avoid dialog
+    echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
+    echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
+    
     apt-get install -y \
         curl \
         wget \
