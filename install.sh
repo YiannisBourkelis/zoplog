@@ -192,10 +192,11 @@ setup_database() {
     log_info "Waiting for MariaDB to start..."
     sleep 3
     
-    # Try to connect without password first (fresh installation)
-    log_info "Configuring MariaDB security..."
+    # Check if we can connect without password (fresh installation)
+    log_info "Checking MariaDB configuration..."
     if mysql -u root -e "SELECT 1;" >/dev/null 2>&1; then
         # No password set - configure security
+        log_info "Configuring MariaDB security with new root password..."
         mysql -u root <<EOF
 -- Set root password
 ALTER USER 'root'@'localhost' IDENTIFIED BY '$DB_PASS';
@@ -205,14 +206,59 @@ DROP DATABASE IF EXISTS test;
 DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
 FLUSH PRIVILEGES;
 EOF
-        log_info "MariaDB security configured with new root password"
+        log_success "MariaDB security configured with new root password"
+        ROOT_DB_PASS="$DB_PASS"
     else
-        log_warning "Root password already set, attempting to use generated password"
+        # Root password already exists - try to get it from existing credentials
+        if [ -f "$ZOPLOG_HOME/.db_credentials" ]; then
+            log_info "Found existing database credentials, using them..."
+            source "$ZOPLOG_HOME/.db_credentials"
+            ROOT_DB_PASS="$DB_PASS"
+        else
+            # For non-interactive installation, try common approaches
+            log_warning "MariaDB root password is already set."
+            
+            # Try using sudo to access MariaDB (works on many systems)
+            if sudo mysql -u root -e "SELECT 1;" >/dev/null 2>&1; then
+                log_info "Using sudo authentication to access MariaDB..."
+                
+                # Create database and user using sudo mysql
+                sudo mysql -u root <<EOF
+CREATE DATABASE IF NOT EXISTS $DB_NAME CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASS';
+GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'localhost';
+FLUSH PRIVILEGES;
+EOF
+                log_success "Database setup completed using sudo authentication"
+                
+                # Save database credentials
+                cat > "$ZOPLOG_HOME/.db_credentials" <<EOF
+DB_HOST=localhost
+DB_NAME=$DB_NAME
+DB_USER=$DB_USER
+DB_PASS=$DB_PASS
+EOF
+                chmod 600 "$ZOPLOG_HOME/.db_credentials"
+                chown "$ZOPLOG_USER:$ZOPLOG_USER" "$ZOPLOG_HOME/.db_credentials"
+                return 0
+            fi
+            
+            # If sudo doesn't work, provide instructions
+            log_error "Cannot access MariaDB. Please either:"
+            log_error "1. Run: sudo mysql_secure_installation (and set a root password)"
+            log_error "2. Or run: sudo mysql -u root"
+            log_error "   Then manually create the database and user:"
+            log_error "   CREATE DATABASE $DB_NAME;"
+            log_error "   CREATE USER '$DB_USER'@'localhost' IDENTIFIED BY 'your_password';"
+            log_error "   GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'localhost';"
+            log_error "   FLUSH PRIVILEGES;"
+            exit 1
+        fi
     fi
 
-    # Create database and user
+    # Create database and user with password authentication
     log_info "Creating ZopLog database and user..."
-    mysql -u root -p"$DB_PASS" <<EOF
+    mysql -u root -p"$ROOT_DB_PASS" <<EOF
 CREATE DATABASE IF NOT EXISTS $DB_NAME CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASS';
 GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'localhost';
