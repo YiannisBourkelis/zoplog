@@ -655,7 +655,7 @@ setup_systemd_services() {
     cat > /etc/systemd/system/zoplog-logger.service <<EOF
 [Unit]
 Description=ZopLog Network Packet Logger
-After=network.target systemd-networkd.service br-zoplog.service
+After=network.target systemd-networkd.service
 Wants=systemd-networkd.service
 Requires=network.target
 
@@ -714,10 +714,10 @@ EOF
     systemctl enable zoplog-logger.service
     systemctl enable zoplog-blockreader.service
     
-    # Start services now (after network is configured)
-    log_info "Starting ZopLog services..."
-    systemctl start zoplog-logger.service || log_warning "Could not start zoplog-logger service (will auto-start on boot)"
-    systemctl start zoplog-blockreader.service || log_warning "Could not start zoplog-blockreader service (will auto-start on boot)"
+    # Start services non-blocking to avoid hangs during install; they are also enabled for boot
+    log_info "Starting ZopLog services (non-blocking)..."
+    systemctl start --no-block zoplog-logger.service || log_warning "Could not start zoplog-logger service (will auto-start on boot)"
+    systemctl start --no-block zoplog-blockreader.service || log_warning "Could not start zoplog-blockreader service (will auto-start on boot)"
     
     log_success "Systemd services created and enabled for boot startup"
 }
