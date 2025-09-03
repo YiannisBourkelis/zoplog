@@ -176,18 +176,34 @@ setup_database() {
         log_info "Generated database password"
     fi
     
-    # Secure MariaDB installation
-    mysql_secure_installation --use-default <<EOF
-y
-$DB_PASS
-$DB_PASS
-y
-y
-y
-y
+    # Start MariaDB service
+    systemctl start mariadb
+    systemctl enable mariadb
+    
+    # Wait for MariaDB to be ready
+    log_info "Waiting for MariaDB to start..."
+    sleep 3
+    
+    # Try to connect without password first (fresh installation)
+    log_info "Configuring MariaDB security..."
+    if mysql -u root -e "SELECT 1;" >/dev/null 2>&1; then
+        # No password set - configure security
+        mysql -u root <<EOF
+-- Set root password
+ALTER USER 'root'@'localhost' IDENTIFIED BY '$DB_PASS';
+DELETE FROM mysql.user WHERE User='';
+DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
+DROP DATABASE IF EXISTS test;
+DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
+FLUSH PRIVILEGES;
 EOF
+        log_info "MariaDB security configured with new root password"
+    else
+        log_warning "Root password already set, attempting to use generated password"
+    fi
 
     # Create database and user
+    log_info "Creating ZopLog database and user..."
     mysql -u root -p"$DB_PASS" <<EOF
 CREATE DATABASE IF NOT EXISTS $DB_NAME CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASS';
