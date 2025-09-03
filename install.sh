@@ -264,17 +264,6 @@ setup_python_environment() {
         mysql-connector-python \
         systemd-python
     
-    # Create config.py from template  
-    if [ ! -f config.py ]; then
-        sudo -u "$ZOPLOG_USER" cp config.example.py config.py
-        
-        # Update config with database credentials
-        sed -i "s/'localhost'/'localhost'/g" config.py
-        sed -i "s/'logs_db'/'$DB_NAME'/g" config.py
-        sed -i "s/'root'/'$DB_USER'/g" config.py
-        sed -i "s/'8888'/'$DB_PASS'/g" config.py
-    fi
-    
     # Create updated config.py with system settings support
     cat > config.py <<EOF
 # --- DB connection settings ---
