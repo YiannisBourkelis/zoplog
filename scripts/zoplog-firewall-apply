@@ -51,3 +51,6 @@ add_rule_if_missing output "zoplog-bl-${id}-output-v4-log"  ip  daddr @"$SET_V4"
 add_rule_if_missing output "zoplog-bl-${id}-output-v4-drop" ip  daddr @"$SET_V4" drop
 add_rule_if_missing output "zoplog-bl-${id}-output-v6-log"  ip6 daddr @"$SET_V6" log prefix "ZOPLOG-BLOCKLIST-OUT " level warn
 add_rule_if_missing output "zoplog-bl-${id}-output-v6-drop" ip6 daddr @"$SET_V6" drop
+
+# Auto-save rules after applying
+/usr/local/sbin/zoplog-nft-autosave post-apply >/dev/null 2>&1 || true

@@ -75,3 +75,6 @@ else
   delete_rule_by_comment output "zoplog-bl-${id}-output-v6-log"
   delete_rule_by_comment output "zoplog-bl-${id}-output-v6-drop"
 fi
+
+# Auto-save rules after toggling
+/usr/local/sbin/zoplog-nft-autosave post-toggle >/dev/null 2>&1 || true

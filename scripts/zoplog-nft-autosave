@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# ZopLog NFTables Auto-Save Hook
+# This script automatically saves rules when they change
+
+set -euo pipefail
+
+RULES_FILE="/etc/nftables/zoplog-rules.nft"
+TABLE="zoplog"
+
+# Function to save rules
+save_rules() {
+    /usr/local/sbin/zoplog-nft-save
+}
+
+# Save rules after any ZopLog firewall operation
+case "${1:-}" in
+    "save")
+        save_rules
+        ;;
+    "post-apply"|"post-toggle"|"post-remove")
+        # Auto-save after firewall operations
+        save_rules
+        ;;
+    *)
+        echo "Usage: $0 {save|post-apply|post-toggle|post-remove}"
+        exit 1
+        ;;
+esac

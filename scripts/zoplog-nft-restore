@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# ZopLog NFTables Restore Script
+# This script restores ZopLog nftables rules from saved file
+
+set -euo pipefail
+
+RULES_FILE="/etc/nftables/zoplog-rules.nft"
+
+if [[ -f "$RULES_FILE" ]]; then
+    echo "Restoring ZopLog NFTables rules from $RULES_FILE"
+    nft -f "$RULES_FILE"
+    echo "ZopLog rules restored successfully"
+else
+    echo "No saved rules file found at $RULES_FILE"
+    echo "Rules will be created when blocklists are applied"
+fi

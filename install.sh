@@ -347,8 +347,47 @@ www-data ALL=(root) NOPASSWD: /usr/local/sbin/zoplog-firewall-*
 www-data ALL=(root) NOPASSWD: /usr/local/sbin/zoplog-nft-*
 $ZOPLOG_USER ALL=(root) NOPASSWD: /usr/local/sbin/zoplog-*
 EOF
+
+    # Create NFTables persistence systemd service
+    cat > /etc/systemd/system/zoplog-nftables.service <<EOF
+[Unit]
+Description=ZopLog NFTables Rules Persistence
+After=network.target nftables.service
+Wants=nftables.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/zoplog-nft-restore
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Create blocklist restoration service
+    cat > /etc/systemd/system/zoplog-restore.service <<EOF
+[Unit]
+Description=ZopLog Active Blocklists Restoration
+After=network.target mariadb.service zoplog-nftables.service
+Wants=mariadb.service
+Requires=zoplog-nftables.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/sbin/zoplog-restore-blocklists
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Enable the persistence services
+    systemctl daemon-reload
+    systemctl enable zoplog-nftables.service
+    systemctl enable zoplog-restore.service
     
-    log_success "Scripts installed successfully"
+    log_success "Scripts installed and NFTables persistence configured"
 }
 
 setup_transparent_proxy() {

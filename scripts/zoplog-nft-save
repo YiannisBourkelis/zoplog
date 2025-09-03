@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# ZopLog NFTables Persistence Script
+# This script saves current ZopLog nftables rules to a file
+
+set -euo pipefail
+
+RULES_FILE="/etc/nftables/zoplog-rules.nft"
+TABLE="zoplog"
+
+# Create directory if it doesn't exist
+mkdir -p /etc/nftables
+
+# Save ZopLog table rules
+echo "#!/usr/sbin/nft -f" > "$RULES_FILE"
+echo "# ZopLog NFTables Rules - Auto-generated on $(date)" >> "$RULES_FILE"
+echo "" >> "$RULES_FILE"
+
+# Export the zoplog table if it exists
+if nft list table inet "$TABLE" >/dev/null 2>&1; then
+    echo "# ZopLog table and rules" >> "$RULES_FILE"
+    nft list table inet "$TABLE" >> "$RULES_FILE"
+    echo "" >> "$RULES_FILE"
+    echo "Rules saved successfully to $RULES_FILE"
+else
+    echo "# No ZopLog table found - will be created by services" >> "$RULES_FILE"
+    echo "No ZopLog table found to save"
+fi
+
+chmod 644 "$RULES_FILE"

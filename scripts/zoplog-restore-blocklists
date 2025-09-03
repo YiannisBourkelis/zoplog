@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# ZopLog Blocklist Restoration Script
+# This script restores active blocklists from database on boot
+
+set -euo pipefail
+
+# Source database credentials
+if [[ -f "/opt/zoplog/.db_credentials" ]]; then
+    source /opt/zoplog/.db_credentials
+else
+    echo "Database credentials not found" >&2
+    exit 1
+fi
+
+# Query active blocklists
+ACTIVE_LISTS=$(mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -sN -e "SELECT id FROM blocklists WHERE active='active'")
+
+if [[ -z "$ACTIVE_LISTS" ]]; then
+    echo "No active blocklists found"
+    exit 0
+fi
+
+echo "Restoring active blocklists..."
+
+# Apply firewall rules for each active blocklist
+for list_id in $ACTIVE_LISTS; do
+    echo "Applying blocklist $list_id..."
+    /usr/local/sbin/zoplog-firewall-apply "$list_id" || echo "Failed to apply blocklist $list_id"
+done
+
+echo "Blocklist restoration completed"
