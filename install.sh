@@ -97,7 +97,15 @@ detect_interfaces() {
     log_info "Internet interface: $INTERNET_IF"
     log_info "Internal interface: $INTERNAL_IF"
     
-    read -p "Press Enter to continue or Ctrl+C to abort and configure manually"
+    # Auto-continue after 5 seconds if running non-interactively
+    if [ -t 0 ]; then
+        # Interactive terminal - ask for confirmation
+        read -p "Press Enter to continue or Ctrl+C to abort and configure manually"
+    else
+        # Non-interactive (piped from curl) - auto-continue
+        log_info "Auto-continuing in 3 seconds... (Ctrl+C to abort)"
+        sleep 3
+    fi
 }
 
 install_dependencies() {
