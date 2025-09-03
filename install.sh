@@ -178,6 +178,19 @@ create_zoplog_user() {
 setup_database() {
     log_info "Setting up MariaDB database..."
     
+    # Fast path: if credentials already exist and connect, skip DB setup
+    if [ -f "$ZOPLOG_HOME/.db_credentials" ]; then
+        log_info "Found existing database credentials, testing connection..."
+        # shellcheck disable=SC1090
+        source "$ZOPLOG_HOME/.db_credentials"
+        if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SELECT 1;" >/dev/null 2>&1; then
+            log_success "Database already configured; skipping database setup"
+            return 0
+        else
+            log_warning "Existing credentials failed; proceeding with database setup"
+        fi
+    fi
+    
     # Generate random password if not set
     if [ -z "$DB_PASS" ]; then
         DB_PASS=$(openssl rand -base64 32)
