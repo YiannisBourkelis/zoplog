@@ -46,9 +46,39 @@ sudo apt install python3 python3-pip python3-scapy python3-
 
 ## Usage
 
-- The Python logger will start capturing network traffic and logging the requests to the  database.
+- The Python logger will start capturing network traffic and logging the requests to the database.
 - Use the PHP web interface to view the logged data and manage unwanted content.
+- Access the real-time dashboard for live monitoring and analytics.
+
+## Features
+
+- **Real-time Network Monitoring**: Live dashboard with 2-second updates
+- **Traffic Analysis**: Detailed breakdown of allowed vs blocked requests
+- **System Resource Monitoring**: CPU, memory, disk, and network usage tracking
+- **Interactive Charts**: Visual representation of traffic patterns and system metrics
+- **Blocklist Management**: Web interface for managing content filters
+- **NFTables Integration**: Advanced firewall rule management
+- **RESTful API**: Centralized data access through `/api/realtime_data.php`
 
 ## Contributing
 
-Feel free to submit issues or pull requests to improve the project.
+We welcome contributions to ZopLog! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details on:
+
+- How to submit issues and pull requests
+- Code standards and best practices
+- Copyright assignment requirements
+- Security vulnerability reporting
+
+## License
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+### Copyright Notice
+
+Copyright 2025 Yiannis Bourkelis. All contributors assign their rights to the project maintainer.
+
+## Support
+
+- Report bugs and request features through GitHub Issues
+- For security vulnerabilities, please contact the maintainer directly
+- Documentation and setup help available in the project wiki
