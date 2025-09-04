@@ -416,8 +416,16 @@ setup_web_interface() {
 setup_sudoers() {
     log_info "Setting up sudoers permissions for web interface..."
     
-    # Create sudoers entry for ZopLog web interface
-    cat > /etc/sudoers.d/zoplog-web <<'EOF'
+    # Remove any existing zoplog sudoers files to avoid conflicts
+    rm -f /etc/sudoers.d/zoplog /etc/sudoers.d/zoplog-web
+    
+    # Create consolidated sudoers entry for ZopLog
+    cat > /etc/sudoers.d/zoplog-web <<EOF
+# ZopLog firewall management
+www-data ALL=(root) NOPASSWD: /usr/local/sbin/zoplog-firewall-*
+www-data ALL=(root) NOPASSWD: /usr/local/sbin/zoplog-nft-*
+$ZOPLOG_USER ALL=(root) NOPASSWD: /usr/local/sbin/zoplog-*
+
 # Allow www-data to manage ZopLog services without password
 www-data ALL=(ALL) NOPASSWD: /bin/systemctl restart zoplog-logger
 www-data ALL=(ALL) NOPASSWD: /bin/systemctl restart zoplog-blockreader  
@@ -433,6 +441,7 @@ www-data ALL=(ALL) NOPASSWD: /bin/systemctl is-enabled zoplog-logger
 www-data ALL=(ALL) NOPASSWD: /bin/systemctl is-enabled zoplog-blockreader
 www-data ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u zoplog-logger*
 www-data ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u zoplog-blockreader*
+
 # Allow www-data to fix configuration permissions
 www-data ALL=(ALL) NOPASSWD: /bin/chmod 660 /etc/zoplog/zoplog.conf
 EOF
@@ -504,14 +513,6 @@ setup_scripts() {
     cp "$ZOPLOG_HOME/zoplog/scripts/"* /usr/local/sbin/
     chmod +x /usr/local/sbin/zoplog-*
     
-    # Setup sudoers for www-data to execute firewall scripts
-    cat > /etc/sudoers.d/zoplog <<EOF
-# ZopLog firewall management
-www-data ALL=(root) NOPASSWD: /usr/local/sbin/zoplog-firewall-*
-www-data ALL=(root) NOPASSWD: /usr/local/sbin/zoplog-nft-*
-$ZOPLOG_USER ALL=(root) NOPASSWD: /usr/local/sbin/zoplog-*
-EOF
-
     # Create NFTables persistence systemd service
     cat > /etc/systemd/system/zoplog-nftables.service <<EOF
 [Unit]
