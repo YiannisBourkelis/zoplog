@@ -347,7 +347,7 @@ EOF
 
     # Set secure permissions for system config
     chown root:www-data /etc/zoplog/zoplog.conf
-    chmod 640 /etc/zoplog/zoplog.conf
+    chmod 660 /etc/zoplog/zoplog.conf
     
     # Allow zoplog user to read the config by adding to www-data group
     usermod -a -G www-data "$ZOPLOG_USER" 2>/dev/null || true
@@ -445,6 +445,9 @@ www-data ALL=(ALL) NOPASSWD: /bin/systemctl is-enabled zoplog-logger
 www-data ALL=(ALL) NOPASSWD: /bin/systemctl is-enabled zoplog-blockreader
 www-data ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u zoplog-logger*
 www-data ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u zoplog-blockreader*
+# Allow www-data to fix configuration permissions
+www-data ALL=(ALL) NOPASSWD: /bin/chmod 660 /etc/zoplog/zoplog.conf
+www-data ALL=(ALL) NOPASSWD: /bin/chown root:www-data /etc/zoplog/zoplog.conf
 EOF
     
     # Set proper permissions for sudoers file

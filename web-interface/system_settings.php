@@ -113,8 +113,8 @@ function saveSystemSettings($settings) {
     $result = file_put_contents($settingsFile, $config);
     
     if ($result !== false) {
-        // Set proper permissions (readable by zoplog and www-data groups)
-        chmod($settingsFile, 0640);
+        // Set proper permissions (readable and writable by www-data group)
+        chmod($settingsFile, 0660);
         
         // Try to set proper ownership
         if (function_exists('chown') && function_exists('chgrp')) {
@@ -277,6 +277,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             $message = "Service Status:\n" . implode("\n", $results);
             $messageType = 'info';
+        } elseif ($_POST['action'] === 'fix_config_permissions') {
+            // Fix configuration file permissions
+            $commands = [
+                'sudo chmod 660 /etc/zoplog/zoplog.conf',
+                'sudo chown root:www-data /etc/zoplog/zoplog.conf'
+            ];
+            
+            $outputs = [];
+            $allSuccess = true;
+            foreach ($commands as $cmd) {
+                $output = shell_exec($cmd . ' 2>&1');
+                if ($output === null || trim($output) === '') {
+                    $outputs[] = "$cmd: Success";
+                } else {
+                    $outputs[] = "$cmd: " . trim($output);
+                    $allSuccess = false;
+                }
+            }
+            
+            // Test if permissions are now correct
+            $settingsFile = '/etc/zoplog/zoplog.conf';
+            $isWritable = is_writable($settingsFile);
+            $outputs[] = "";
+            $outputs[] = "Configuration file permissions check:";
+            $outputs[] = "File writable by web server: " . ($isWritable ? 'YES' : 'NO');
+            
+            if ($isWritable) {
+                $message = "Configuration permissions fixed successfully!\n\n" . implode("\n", $outputs);
+                $messageType = 'success';
+            } else {
+                $message = "Permission fix completed, but file may still not be writable:\n\n" . implode("\n", $outputs);
+                $messageType = 'warning';
+            }
         }
     }
 }
@@ -482,9 +515,21 @@ $availableInterfaces = getAvailableInterfaces();
                             Check Status
                         </button>
                     </form>
+                    
+                    <form method="POST">
+                        <input type="hidden" name="action" value="fix_config_permissions">
+                        <button type="submit" 
+                                class="bg-orange-600 text-white px-6 py-3 rounded-lg hover:bg-orange-700 transition duration-200 flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                            </svg>
+                            Fix Config Permissions
+                        </button>
+                    </form>
                 </div>
                 
                 <p class="text-sm text-gray-500">
+                    If you get "Could not save settings file" errors, try the "Fix Config Permissions" button first.<br>
                     If service restart fails, you may need to configure sudoers permissions for the web server.
                 </p>
             </div>
