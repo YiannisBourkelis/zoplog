@@ -4,7 +4,7 @@
 
 [database]
 host = localhost
-user = zoplog_db
+user = root
 password = your_password_here
 name = logs_db
 port = 3306

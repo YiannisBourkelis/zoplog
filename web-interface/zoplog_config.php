@@ -8,7 +8,7 @@ function load_zoplog_database_config() {
     // Default configuration
     $config = [
         'host' => getenv('ZOPLOG_DB_HOST') ?: 'localhost',
-        'user' => getenv('ZOPLOG_DB_USER') ?: 'zoplog_db', 
+        'user' => getenv('ZOPLOG_DB_USER') ?: 'root', 
         'password' => getenv('ZOPLOG_DB_PASS') ?: '',
         'database' => getenv('ZOPLOG_DB_NAME') ?: 'logs_db',
         'port' => (int)(getenv('ZOPLOG_DB_PORT') ?: 3306),
