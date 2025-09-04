@@ -12,7 +12,7 @@ ZOPLOG_HOME="/opt/zoplog"
 ZOPLOG_REPO="https://github.com/YiannisBourkelis/zoplog.git"
 WEB_ROOT="/var/www/zoplog"
 DB_NAME="logs_db"
-DB_USER="zoplog_db"
+DB_USER="root"
 DB_PASS=""
 
 # Colors for output
@@ -178,23 +178,27 @@ create_zoplog_user() {
 setup_database() {
     log_info "Setting up MariaDB database..."
     
-    # Fast path: if credentials already exist and connect, skip DB setup
-    if [ -f "$ZOPLOG_HOME/.db_credentials" ]; then
-        log_info "Found existing database credentials, testing connection..."
-        # shellcheck disable=SC1090
-        source "$ZOPLOG_HOME/.db_credentials"
+    # Fast path: if centralized config exists and connects, skip DB setup
+    if [ -f "/etc/zoplog/database.conf" ]; then
+        log_info "Found existing centralized database configuration, testing connection..."
+        # Extract credentials from INI file
+        DB_HOST=$(grep "^host" /etc/zoplog/database.conf | cut -d'=' -f2 | xargs)
+        DB_USER=$(grep "^user" /etc/zoplog/database.conf | cut -d'=' -f2 | xargs)
+        DB_PASS=$(grep "^password" /etc/zoplog/database.conf | cut -d'=' -f2 | xargs)
+        DB_NAME=$(grep "^name" /etc/zoplog/database.conf | cut -d'=' -f2 | xargs)
+        
         if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SELECT 1;" >/dev/null 2>&1; then
             log_success "Database already configured; skipping database setup"
             return 0
         else
-            log_warning "Existing credentials failed; proceeding with database setup"
+            log_warning "Existing centralized config failed; proceeding with database setup"
         fi
     fi
     
     # Generate random password if not set
     if [ -z "$DB_PASS" ]; then
         DB_PASS=$(openssl rand -base64 32)
-        log_info "Generated database password"
+        log_info "Generated database password for root user"
     fi
     
     # Start MariaDB service
@@ -234,25 +238,20 @@ EOF
             # Try using sudo to access MariaDB (works on many systems)
             if sudo mysql -u root -e "SELECT 1;" >/dev/null 2>&1; then
                 log_info "Using sudo authentication to access MariaDB..."
+                log_info "Setting up database and configuring root user password..."
                 
-                # Create database and user using sudo mysql
+                # Set root password and create database using sudo mysql
                 sudo mysql -u root <<EOF
+-- Set root password if not already set
+ALTER USER 'root'@'localhost' IDENTIFIED BY '$DB_PASS';
 CREATE DATABASE IF NOT EXISTS $DB_NAME CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASS';
-GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'localhost';
 FLUSH PRIVILEGES;
 EOF
                 log_success "Database setup completed using sudo authentication"
+                ROOT_DB_PASS="$DB_PASS"
                 
-                # Save database credentials
-                cat > "$ZOPLOG_HOME/.db_credentials" <<EOF
-DB_HOST=localhost
-DB_NAME=$DB_NAME
-DB_USER=$DB_USER
-DB_PASS=$DB_PASS
-EOF
-                chmod 600 "$ZOPLOG_HOME/.db_credentials"
-                chown "$ZOPLOG_USER:$ZOPLOG_USER" "$ZOPLOG_HOME/.db_credentials"
+                # Create centralized configuration
+                setup_centralized_config
                 return 0
             fi
             
@@ -262,33 +261,25 @@ EOF
             log_error "2. Or run: sudo mysql -u root"
             log_error "   Then manually create the database and user:"
             log_error "   CREATE DATABASE $DB_NAME;"
-            log_error "   CREATE USER '$DB_USER'@'localhost' IDENTIFIED BY 'your_password';"
-            log_error "   GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'localhost';"
-            log_error "   FLUSH PRIVILEGES;"
+            log_error "   Then set root password and use the centralized configuration"
             exit 1
         fi
     fi
 
-    # Create database and user with password authentication
-    log_info "Creating ZopLog database and user..."
+    # Create database using existing root password
+    log_info "Creating ZopLog database..."
     mysql -u root -p"$ROOT_DB_PASS" <<EOF
 CREATE DATABASE IF NOT EXISTS $DB_NAME CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASS';
-GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'localhost';
 FLUSH PRIVILEGES;
 EOF
     
     log_success "Database setup completed"
     
-    # Save database credentials
-    cat > "$ZOPLOG_HOME/.db_credentials" <<EOF
-DB_HOST=localhost
-DB_NAME=$DB_NAME
-DB_USER=$DB_USER
-DB_PASS=$DB_PASS
-EOF
-    chmod 600 "$ZOPLOG_HOME/.db_credentials"
-    chown "$ZOPLOG_USER:$ZOPLOG_USER" "$ZOPLOG_HOME/.db_credentials"
+    # Use the existing root password for our configuration
+    DB_PASS="$ROOT_DB_PASS"
+    
+    # Create centralized configuration
+    setup_centralized_config
 }
 
 download_zoplog() {
@@ -305,6 +296,53 @@ download_zoplog() {
     
     chown -R "$ZOPLOG_USER:$ZOPLOG_USER" "$ZOPLOG_HOME/zoplog"
     log_success "ZopLog downloaded successfully"
+}
+
+setup_centralized_config() {
+    log_info "Setting up centralized configuration..."
+    
+    # Create /etc/zoplog directory
+    mkdir -p /etc/zoplog
+    
+    # Create centralized database configuration
+    cat > /etc/zoplog/database.conf <<EOF
+# ZopLog Database Configuration
+# This file contains sensitive information - keep secure
+
+[database]
+host = localhost
+user = $DB_USER
+password = $DB_PASS
+name = $DB_NAME
+port = 3306
+
+[logging]
+level = INFO
+EOF
+
+    # Set secure permissions
+    chown root:www-data /etc/zoplog/database.conf
+    chmod 640 /etc/zoplog/database.conf
+    
+    # Allow zoplog user to read the config by adding to www-data group
+    usermod -a -G www-data "$ZOPLOG_USER" 2>/dev/null || true
+    
+    # Copy centralized config modules to installation directories
+    log_info "Installing centralized configuration modules..."
+    
+    # Install Python config module
+    if [ -f "$ZOPLOG_HOME/zoplog/python-logger/zoplog_config.py" ]; then
+        cp "$ZOPLOG_HOME/zoplog/python-logger/zoplog_config.py" "$ZOPLOG_HOME/zoplog/python-logger/"
+        chown "$ZOPLOG_USER:$ZOPLOG_USER" "$ZOPLOG_HOME/zoplog/python-logger/zoplog_config.py"
+    fi
+    
+    # Install PHP config module  
+    if [ -f "$ZOPLOG_HOME/zoplog/web-interface/zoplog_config.php" ]; then
+        cp "$ZOPLOG_HOME/zoplog/web-interface/zoplog_config.php" "$WEB_ROOT/"
+        chown www-data:www-data "$WEB_ROOT/zoplog_config.php"
+    fi
+    
+    log_success "Centralized configuration setup complete"
 }
 
 setup_python_environment() {
@@ -353,96 +391,11 @@ setup_web_interface() {
     mkdir -p "$WEB_ROOT"
     cp -r "$ZOPLOG_HOME/zoplog/web-interface/"* "$WEB_ROOT/"
     
-    # Update database configuration
-    cat > "$WEB_ROOT/db.php" <<EOF
-<?php
-// db.php - MariaDB connection helper
-\$DB_HOST = 'localhost';
-\$DB_USER = '$DB_USER';
-\$DB_PASS = '$DB_PASS';
-\$DB_NAME = '$DB_NAME';
-
-\$mysqli = @new mysqli(\$DB_HOST, \$DB_USER, \$DB_PASS, \$DB_NAME);
-if (\$mysqli->connect_errno) {
-    http_response_code(500);
-    die('Database connection failed: ' . htmlspecialchars(\$mysqli->connect_error));
-}
-\$mysqli->set_charset('utf8mb4');
-?>
-EOF
-
-    # Update config.php with proper database credentials
-    cat > "$WEB_ROOT/config.php" <<EOF
-<?php
-// ZopLog Web Interface Configuration
-
-// Database configuration
-define('DB_HOST', 'localhost');
-define('DB_NAME', '$DB_NAME');
-define('DB_USER', '$DB_USER');
-define('DB_PASS', '$DB_PASS');
-
-// System settings file path
-define('SYSTEM_SETTINGS_FILE', '/opt/zoplog/settings.json');
-
-// Default system settings
-define('DEFAULT_MONITOR_INTERFACE', 'br-zoplog');
-
-/**
- * Load system settings from JSON file
- */
-function loadSystemSettings() {
-    \$defaults = [
-        'monitor_interface' => DEFAULT_MONITOR_INTERFACE,
-        'last_updated' => null
-    ];
+    # Remove any old configuration files that might have been copied
+    rm -f "$WEB_ROOT/db.php" "$WEB_ROOT/config.php" "$WEB_ROOT/config.php.old"
     
-    if (file_exists(SYSTEM_SETTINGS_FILE)) {
-        \$content = file_get_contents(SYSTEM_SETTINGS_FILE);
-        if (\$content !== false) {
-            \$settings = json_decode(\$content, true);
-            if (\$settings !== null) {
-                return array_merge(\$defaults, \$settings);
-            }
-        }
-    }
-    return \$defaults;
-}
-
-/**
- * Save system settings to JSON file
- */
-function saveSystemSettings(\$settings) {
-    \$settings['last_updated'] = date('Y-m-d H:i:s');
+    # The centralized configuration is already handled by setup_centralized_config()
     
-    \$json = json_encode(\$settings, JSON_PRETTY_PRINT);
-    \$result = file_put_contents(SYSTEM_SETTINGS_FILE, \$json);
-    
-    if (\$result !== false) {
-        // Set proper permissions
-        chmod(SYSTEM_SETTINGS_FILE, 0644);
-        return true;
-    }
-    return false;
-}
-
-// Create a database connection
-try {
-    \$pdo = new PDO("mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4", 
-                   DB_USER, 
-                   DB_PASS,
-                   [
-                       PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                       PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                       PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4"
-                   ]);
-} catch (PDOException \$e) {
-    error_log("Database connection failed: " . \$e->getMessage());
-    echo "Database connection failed. Please check configuration.";
-}
-?>
-EOF
-
     # Create initial system settings file
     cat > "$ZOPLOG_HOME/settings.json" <<EOF
 {

@@ -1,6 +1,22 @@
 #!/bin/bash
 # setup-centralized-config.sh
-# Script to deploy centralized ZopLog configuration
+# Sc# Create the centralized config
+sudo tee /etc/zoplog/database.conf >/dev/null <<EOF
+# ZopLog Database Configuration
+# This file contains sensitive information - keep secure
+
+[database]
+host = $DB_HOST
+user = $DB_USER
+password = $DB_PASS
+name = $DB_NAME
+port = $DB_PORT
+
+[logging]
+level = INFO
+EOF
+
+echo -e "${GREEN}Database configuration created at /etc/zoplog/database.conf${NC}"tralized ZopLog configuration
 
 set -euo pipefail
 
@@ -29,36 +45,20 @@ if [ -f "/etc/zoplog/database.conf" ]; then
     fi
 fi
 
-# 3. Create database configuration if needed
-if [ "${SKIP_DB_CONFIG:-0}" != "1" ]; then
-    echo "Creating database configuration..."
-    
-    # Try to read existing credentials from legacy locations
-    DB_USER="zoplog_db"
-    DB_PASS=""
-    DB_NAME="logs_db"
-    DB_HOST="localhost"
-    DB_PORT="3306"
-    
-    if [ -f "/opt/zoplog/.db_credentials" ]; then
-        echo "Found legacy credentials, migrating..."
-        while IFS='=' read -r key value; do
-            case "$key" in
-                "DB_USER"|"USER") DB_USER="$value" ;;
-                "DB_PASS"|"PASSWORD"|"PASS") DB_PASS="$value" ;;
-                "DB_NAME"|"DATABASE"|"NAME") DB_NAME="$value" ;;
-                "DB_HOST"|"HOST") DB_HOST="$value" ;;
-                "DB_PORT"|"PORT") DB_PORT="$value" ;;
-            esac
-        done < /opt/zoplog/.db_credentials
-    fi
-    
-    # Prompt for database password if not found
-    if [ -z "$DB_PASS" ]; then
-        echo -e "${YELLOW}Database password not found in legacy config.${NC}"
-        read -s -p "Enter database password for user $DB_USER: " DB_PASS
-        echo ""
-    fi
+# 3. Create database configuration
+echo "Creating database configuration..."
+
+# Default database settings
+DB_USER="root"
+DB_PASS=""
+DB_NAME="logs_db"
+DB_HOST="localhost"
+DB_PORT="3306"
+
+# Prompt for database password
+echo -e "${YELLOW}Please enter the database password for user $DB_USER:${NC}"
+read -s -p "Database password: " DB_PASS
+echo ""
     
     # Create the centralized config
     sudo tee /etc/zoplog/database.conf >/dev/null <<EOF
