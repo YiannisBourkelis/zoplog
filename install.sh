@@ -352,20 +352,8 @@ EOF
     # Allow zoplog user to read the config by adding to www-data group
     usermod -a -G www-data "$ZOPLOG_USER" 2>/dev/null || true
     
-    # Copy centralized config modules to installation directories
-    log_info "Installing centralized configuration modules..."
-    
-    # Install Python config module
-    if [ -f "$ZOPLOG_HOME/zoplog/python-logger/zoplog_config.py" ]; then
-        cp "$ZOPLOG_HOME/zoplog/python-logger/zoplog_config.py" "$ZOPLOG_HOME/zoplog/python-logger/"
-        chown "$ZOPLOG_USER:$ZOPLOG_USER" "$ZOPLOG_HOME/zoplog/python-logger/zoplog_config.py"
-    fi
-    
-    # Install PHP config module  
-    if [ -f "$ZOPLOG_HOME/zoplog/web-interface/zoplog_config.php" ]; then
-        cp "$ZOPLOG_HOME/zoplog/web-interface/zoplog_config.php" "$WEB_ROOT/"
-        chown www-data:www-data "$WEB_ROOT/zoplog_config.php"
-    fi
+    # Ensure proper ownership of downloaded files
+    chown -R "$ZOPLOG_USER:$ZOPLOG_USER" "$ZOPLOG_HOME/zoplog"
     
     log_success "Centralized configuration setup complete"
 }
