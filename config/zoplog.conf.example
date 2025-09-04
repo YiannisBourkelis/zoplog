@@ -1,0 +1,38 @@
+# ZopLog System Configuration Example
+# This file should be placed at /etc/zoplog/zoplog.conf
+# with permissions 640 and ownership root:www-data
+
+[monitoring]
+# Network interface for traffic monitoring
+# eth0 = WAN interface (recommended for internet threat detection)
+# br-zoplog = Bridge interface (internal traffic monitoring)
+interface = eth0
+
+# Packet capture mode
+capture_mode = promiscuous
+
+# Logging level for monitoring
+log_level = INFO
+
+[firewall]
+# Network interface for applying firewall rules
+# Should typically match monitoring interface for consistent protection
+apply_to_interface = eth0
+
+# Blocking mode when threats are detected
+# immediate = Block as soon as threat is detected
+# manual = Log threats but require manual blocking
+block_mode = immediate
+
+# Whether to log blocked traffic
+log_blocked = true
+
+[system]
+# How often to check for system updates (seconds)
+update_interval = 30
+
+# Maximum number of log entries to keep in memory
+max_log_entries = 10000
+
+# Last configuration update timestamp (auto-generated)
+last_updated = 2025-09-04 16:00:00

@@ -5,23 +5,46 @@ require_once __DIR__ . '/zoplog_config.php';
 $message = '';
 $messageType = '';
 
-// Load current settings
+// Load current settings from centralized config
 function loadSystemSettings() {
-    $settingsFile = '/opt/zoplog/settings.json';
+    $settingsFile = '/etc/zoplog/zoplog.conf';
+    
     $defaults = [
-        'monitor_interface' => 'br-zoplog',
+        'monitor_interface' => 'eth0',  // Default to WAN interface for better internet traffic monitoring
+        'firewall_interface' => 'eth0',  // Apply firewall rules to internet-facing interface
+        'capture_mode' => 'promiscuous',
+        'log_level' => 'INFO',
+        'block_mode' => 'immediate',
+        'log_blocked' => true,
+        'update_interval' => 30,
+        'max_log_entries' => 10000,
         'last_updated' => null
     ];
     
+    // Try centralized config first (INI format)
     if (file_exists($settingsFile)) {
-        $content = file_get_contents($settingsFile);
-        if ($content !== false) {
-            $settings = json_decode($content, true);
-            if ($settings !== null) {
-                return array_merge($defaults, $settings);
+        $settings = parse_ini_file($settingsFile, true);
+        if ($settings !== false) {
+            $config = $defaults;
+            if (isset($settings['monitoring'])) {
+                $config['monitor_interface'] = $settings['monitoring']['interface'] ?? $config['monitor_interface'];
+                $config['capture_mode'] = $settings['monitoring']['capture_mode'] ?? $config['capture_mode'];
+                $config['log_level'] = $settings['monitoring']['log_level'] ?? $config['log_level'];
             }
+            if (isset($settings['firewall'])) {
+                $config['firewall_interface'] = $settings['firewall']['apply_to_interface'] ?? $config['firewall_interface'];
+                $config['block_mode'] = $settings['firewall']['block_mode'] ?? $config['block_mode'];
+                $config['log_blocked'] = filter_var($settings['firewall']['log_blocked'] ?? $config['log_blocked'], FILTER_VALIDATE_BOOLEAN);
+            }
+            if (isset($settings['system'])) {
+                $config['update_interval'] = (int)($settings['system']['update_interval'] ?? $config['update_interval']);
+                $config['max_log_entries'] = (int)($settings['system']['max_log_entries'] ?? $config['max_log_entries']);
+                $config['last_updated'] = $settings['system']['last_updated'] ?? $config['last_updated'];
+            }
+            return $config;
         }
     }
+    
     return $defaults;
 }
 
@@ -52,9 +75,9 @@ function getAvailableInterfaces() {
     return $interfaces;
 }
 
-// Save settings
+// Save settings to centralized config
 function saveSystemSettings($settings) {
-    $settingsFile = '/opt/zoplog/settings.json';
+    $settingsFile = '/etc/zoplog/zoplog.conf';
     $settingsDir = dirname($settingsFile);
     
     // Ensure directory exists
@@ -67,17 +90,35 @@ function saveSystemSettings($settings) {
     
     $settings['last_updated'] = date('Y-m-d H:i:s');
     
-    $json = json_encode($settings, JSON_PRETTY_PRINT);
+    // Create INI format configuration
+    $config = "# ZopLog System Configuration\n";
+    $config .= "# This file contains system settings for monitoring and firewall\n\n";
+    
+    $config .= "[monitoring]\n";
+    $config .= "interface = " . ($settings['monitor_interface'] ?? 'eth0') . "\n";
+    $config .= "capture_mode = " . ($settings['capture_mode'] ?? 'promiscuous') . "\n";
+    $config .= "log_level = " . ($settings['log_level'] ?? 'INFO') . "\n\n";
+    
+    $config .= "[firewall]\n";
+    $config .= "apply_to_interface = " . ($settings['firewall_interface'] ?? $settings['monitor_interface'] ?? 'eth0') . "\n";
+    $config .= "block_mode = " . ($settings['block_mode'] ?? 'immediate') . "\n";
+    $config .= "log_blocked = " . ($settings['log_blocked'] ? 'true' : 'false') . "\n\n";
+    
+    $config .= "[system]\n";
+    $config .= "update_interval = " . ($settings['update_interval'] ?? 30) . "\n";
+    $config .= "max_log_entries = " . ($settings['max_log_entries'] ?? 10000) . "\n";
+    $config .= "last_updated = " . $settings['last_updated'] . "\n";
     
     // Try to write the file
-    $result = file_put_contents($settingsFile, $json);
+    $result = file_put_contents($settingsFile, $config);
     
     if ($result !== false) {
-        // Set proper permissions
-        chmod($settingsFile, 0664);
+        // Set proper permissions (readable by zoplog and www-data groups)
+        chmod($settingsFile, 0640);
         
-        // Try to set group to www-data for web access
-        if (function_exists('chgrp')) {
+        // Try to set proper ownership
+        if (function_exists('chown') && function_exists('chgrp')) {
+            @chown($settingsFile, 'root');
             @chgrp($settingsFile, 'www-data');
         }
         
@@ -127,7 +168,7 @@ except Exception as e:
     chmod($testScript, 0755);
     
     // Run the test
-    $output = shell_exec("bash -lc 'cd /opt/zoplog/zoplog/python-logger && . venv/bin/activate && python3 $testScript' 2>&1");
+    $output = shell_exec("cd /home/yiannis/projects/zoplog/python-logger && python3 $testScript 2>&1");
     unlink($testScript);
     
     return $output;
@@ -138,15 +179,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['action'])) {
         if ($_POST['action'] === 'save_settings') {
             $interface = $_POST['monitor_interface'] ?? '';
+            $firewallInterface = $_POST['firewall_interface'] ?? '';
             $availableInterfaces = getAvailableInterfaces();
             
-            if (in_array($interface, $availableInterfaces)) {
+            if (in_array($interface, $availableInterfaces) && in_array($firewallInterface, $availableInterfaces)) {
                 $settings = [
-                    'monitor_interface' => $interface
+                    'monitor_interface' => $interface,
+                    'firewall_interface' => $firewallInterface
                 ];
                 
-                // Debug information
-                $settingsFile = '/opt/zoplog/settings.json';
+                // Debug information - now using centralized config
+                $settingsFile = '/etc/zoplog/zoplog.conf';
                 $settingsDir = dirname($settingsFile);
                 
                 // Check permissions and directory
@@ -234,31 +277,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             $message = "Service Status:\n" . implode("\n", $results);
             $messageType = 'info';
-        } elseif ($_POST['action'] === 'fix_permissions') {
-            // Try to fix permissions and create settings file
-            $commands = [
-                'sudo mkdir -p /opt/zoplog',
-                'sudo touch /opt/zoplog/settings.json',
-                'sudo chown zoplog:www-data /opt/zoplog/settings.json',
-                'sudo chmod 664 /opt/zoplog/settings.json'
-            ];
-            
-            $outputs = [];
-            foreach ($commands as $cmd) {
-                $output = shell_exec($cmd . ' 2>&1');
-                $outputs[] = "$cmd: " . ($output ?: 'success');
-            }
-            
-            // Create initial settings content
-            $initialSettings = ['monitor_interface' => 'br-zoplog', 'last_updated' => date('Y-m-d H:i:s')];
-            $json = json_encode($initialSettings, JSON_PRETTY_PRINT);
-            $tmp = tempnam(sys_get_temp_dir(), 'zoplog');
-            file_put_contents($tmp, $json);
-            // Move with sudo to ensure permissions
-            shell_exec('sudo mv ' . escapeshellarg($tmp) . ' /opt/zoplog/settings.json 2>&1');
-            
-            $message = "Permission fix attempted:\n" . implode("\n", $outputs);
-            $messageType = 'info';
         }
     }
 }
@@ -302,10 +320,23 @@ $availableInterfaces = getAvailableInterfaces();
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"/>
                 </svg>
-                Network Monitoring Interface
+                Network Monitoring & Firewall Configuration
             </h2>
             
-            <form method="POST" class="space-y-4">
+            <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                <h3 class="text-lg font-semibold text-blue-900 mb-2">💡 Recommended Configuration for Internet Monitoring</h3>
+                <div class="text-sm text-blue-800 space-y-2">
+                    <p><strong>For better threat detection, monitor your WAN interface (eth0) instead of the bridge:</strong></p>
+                    <ul class="list-disc list-inside ml-4 space-y-1">
+                        <li><strong>eth0</strong> - Captures all internet traffic (recommended for security monitoring)</li>
+                        <li><strong>br-zoplog</strong> - Captures internal bridge traffic (less effective for threat detection)</li>
+                        <li><strong>Other interfaces</strong> - For specific network segments</li>
+                    </ul>
+                    <p class="font-medium">💡 Most malicious traffic comes from the internet, so monitoring eth0 provides better protection!</p>
+                </div>
+            </div>
+            
+            <form method="POST" class="space-y-6">
                 <input type="hidden" name="action" value="save_settings">
                 
                 <div>
@@ -318,8 +349,10 @@ $availableInterfaces = getAvailableInterfaces();
                             <option value="<?php echo htmlspecialchars($iface); ?>" 
                                     <?php echo $iface === $currentSettings['monitor_interface'] ? 'selected' : ''; ?>>
                                 <?php echo htmlspecialchars($iface); ?>
-                                <?php if ($iface === 'br-zoplog'): ?>
-                                    (Bridge Interface - Recommended)
+                                <?php if ($iface === 'eth0'): ?>
+                                    (WAN Interface - Recommended for Internet Monitoring)
+                                <?php elseif ($iface === 'br-zoplog'): ?>
+                                    (Bridge Interface - Internal Traffic)
                                 <?php elseif (strpos($iface, 'eth') === 0): ?>
                                     (Ethernet Interface)
                                 <?php elseif (strpos($iface, 'wlan') === 0): ?>
@@ -329,7 +362,32 @@ $availableInterfaces = getAvailableInterfaces();
                         <?php endforeach; ?>
                     </select>
                     <p class="mt-2 text-sm text-gray-600">
-                        Current setting: <strong><?php echo htmlspecialchars($currentSettings['monitor_interface']); ?></strong>
+                        Current monitoring: <strong><?php echo htmlspecialchars($currentSettings['monitor_interface']); ?></strong>
+                    </p>
+                </div>
+
+                <div>
+                    <label for="firewall_interface" class="block text-sm font-medium text-gray-700 mb-2">
+                        Select Interface for Firewall Rules:
+                    </label>
+                    <select name="firewall_interface" id="firewall_interface" 
+                            class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        <?php foreach ($availableInterfaces as $iface): ?>
+                            <option value="<?php echo htmlspecialchars($iface); ?>" 
+                                    <?php echo $iface === ($currentSettings['firewall_interface'] ?? $currentSettings['monitor_interface']) ? 'selected' : ''; ?>>
+                                <?php echo htmlspecialchars($iface); ?>
+                                <?php if ($iface === 'eth0'): ?>
+                                    (WAN Interface - Recommended for Internet Blocking)
+                                <?php elseif ($iface === 'br-zoplog'): ?>
+                                    (Bridge Interface - All Traffic)
+                                <?php elseif (strpos($iface, 'eth') === 0): ?>
+                                    (Ethernet Interface)
+                                <?php endif; ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <p class="mt-2 text-sm text-gray-600">
+                        Current firewall: <strong><?php echo htmlspecialchars($currentSettings['firewall_interface'] ?? $currentSettings['monitor_interface']); ?></strong>
                         <?php if ($currentSettings['last_updated']): ?>
                             (Last updated: <?php echo htmlspecialchars($currentSettings['last_updated']); ?>)
                         <?php endif; ?>
@@ -341,7 +399,7 @@ $availableInterfaces = getAvailableInterfaces();
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3-3m0 0l-3 3m3-3v12"/>
                     </svg>
-                    Save Settings
+                    Save Configuration
                 </button>
             </form>
         </div>
@@ -424,21 +482,9 @@ $availableInterfaces = getAvailableInterfaces();
                             Check Status
                         </button>
                     </form>
-                    
-                    <form method="POST">
-                        <input type="hidden" name="action" value="fix_permissions">
-                        <button type="submit" 
-                                class="bg-orange-600 text-white px-6 py-3 rounded-lg hover:bg-orange-700 transition duration-200 flex items-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
-                            </svg>
-                            Fix Permissions
-                        </button>
-                    </form>
                 </div>
                 
                 <p class="text-sm text-gray-500">
-                    If you get "Could not save settings file" errors, try the "Fix Permissions" button first.<br>
                     If service restart fails, you may need to configure sudoers permissions for the web server.
                 </p>
             </div>

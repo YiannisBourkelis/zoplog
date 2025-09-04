@@ -17,8 +17,6 @@ function load_zoplog_database_config() {
     // Try config file locations in order
     $config_paths = [
         '/etc/zoplog/database.conf',
-        '/opt/zoplog/database.conf',
-        '/opt/zoplog/.db_credentials', // Legacy support
     ];
     
     foreach ($config_paths as $path) {

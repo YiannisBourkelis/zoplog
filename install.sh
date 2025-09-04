@@ -324,6 +324,31 @@ EOF
     chown root:www-data /etc/zoplog/database.conf
     chmod 640 /etc/zoplog/database.conf
     
+    # Create centralized system settings configuration
+    cat > /etc/zoplog/zoplog.conf <<EOF
+# ZopLog System Configuration
+# This file contains system settings for monitoring and firewall
+
+[monitoring]
+interface = eth0
+capture_mode = promiscuous
+log_level = INFO
+
+[firewall]
+apply_to_interface = eth0
+block_mode = immediate
+log_blocked = true
+
+[system]
+update_interval = 30
+max_log_entries = 10000
+last_updated = $(date '+%Y-%m-%d %H:%M:%S')
+EOF
+
+    # Set secure permissions for system config
+    chown root:www-data /etc/zoplog/zoplog.conf
+    chmod 640 /etc/zoplog/zoplog.conf
+    
     # Allow zoplog user to read the config by adding to www-data group
     usermod -a -G www-data "$ZOPLOG_USER" 2>/dev/null || true
     
@@ -372,11 +397,8 @@ DB_CONFIG = {
 }
 
 # --- System settings ---
-# Default monitoring interface (will be overridden by web settings)
-DEFAULT_MONITOR_INTERFACE = "br-zoplog"
-
-# Settings file path
-SETTINGS_FILE = "/opt/zoplog/settings.json"
+# Default monitoring interface (will be overridden by centralized config)
+DEFAULT_MONITOR_INTERFACE = "eth0"
 EOF
     
     chown "$ZOPLOG_USER:$ZOPLOG_USER" config.py
@@ -396,21 +418,9 @@ setup_web_interface() {
     
     # The centralized configuration is already handled by setup_centralized_config()
     
-    # Create initial system settings file
-    cat > "$ZOPLOG_HOME/settings.json" <<EOF
-{
-    "monitor_interface": "br-zoplog",
-    "last_updated": "$(date '+%Y-%m-%d %H:%M:%S')"
-}
-EOF
-    
     # Set proper permissions
     chown -R www-data:www-data "$WEB_ROOT"
     chmod -R 755 "$WEB_ROOT"
-    
-    # Set permissions for settings file
-    chown "$ZOPLOG_USER:www-data" "$ZOPLOG_HOME/settings.json"
-    chmod 664 "$ZOPLOG_HOME/settings.json"
     
     log_success "Web interface setup completed"
 }

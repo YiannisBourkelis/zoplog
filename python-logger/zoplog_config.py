@@ -4,13 +4,12 @@ Centralized configuration loader for ZopLog
 Reads from /etc/zoplog/database.conf with fallbacks
 """
 import os
+import json
 import configparser
 from typing import Dict, Any
 
 DEFAULT_CONFIG_PATHS = [
     "/etc/zoplog/database.conf",
-    "/opt/zoplog/database.conf", 
-    "/opt/zoplog/.db_credentials",  # Legacy support
 ]
 
 def load_database_config() -> Dict[str, Any]:
@@ -74,31 +73,62 @@ def load_database_config() -> Dict[str, Any]:
     return config
 
 def load_settings_config() -> Dict[str, Any]:
-    """Load system settings (interface, etc.)"""
-    settings_paths = [
-        "/etc/zoplog/settings.json",
-        "/opt/zoplog/settings.json"
+    """Load system settings from centralized config"""
+    config_paths = [
+        "/etc/zoplog/zoplog.conf",      # Centralized location
     ]
     
+    # Default settings with eth0 as preferred interface for internet monitoring
     defaults = {
-        "monitor_interface": "br-zoplog",
-        "last_updated": None
+        "monitor_interface": "eth0",    # WAN interface for better internet traffic capture
+        "firewall_interface": "eth0",   # Apply firewall to internet-facing interface
+        "capture_mode": "promiscuous",
+        "log_level": "INFO",
+        "block_mode": "immediate",
+        "log_blocked": True,
+        "update_interval": 30,
+        "max_log_entries": 10000
     }
     
-    for path in settings_paths:
-        if os.path.exists(path):
-            try:
-                import json
-                with open(path, 'r') as f:
-                    settings = json.load(f)
-                    return {**defaults, **settings}
-            except Exception as e:
-                print(f"Warning: Could not read settings from {path}: {e}")
-                continue
+    for config_path in config_paths:
+        try:
+            if os.path.exists(config_path):
+                if config_path.endswith('.conf'):
+                    # INI format - new centralized config
+                    import configparser
+                    parser = configparser.ConfigParser()
+                    parser.read(config_path)
+                    
+                    config = defaults.copy()
+                    if parser.has_section('monitoring'):
+                        monitoring = parser['monitoring']
+                        config['monitor_interface'] = monitoring.get('interface', config['monitor_interface'])
+                        config['capture_mode'] = monitoring.get('capture_mode', config['capture_mode'])
+                        config['log_level'] = monitoring.get('log_level', config['log_level'])
+                    
+                    if parser.has_section('firewall'):
+                        firewall = parser['firewall']
+                        config['firewall_interface'] = firewall.get('apply_to_interface', config['firewall_interface'])
+                        config['block_mode'] = firewall.get('block_mode', config['block_mode'])
+                        config['log_blocked'] = firewall.getboolean('log_blocked', config['log_blocked'])
+                    
+                    if parser.has_section('system'):
+                        system = parser['system']
+                        config['update_interval'] = system.getint('update_interval', config['update_interval'])
+                        config['max_log_entries'] = system.getint('max_log_entries', config['max_log_entries'])
+                    
+                    return config
+                else:
+                    # JSON format - legacy
+                    with open(config_path, 'r') as f:
+                        settings = json.load(f)
+                        return {**defaults, **settings}
+        except Exception as e:
+            print(f"Warning: Could not read settings from {config_path}: {e}")
+            continue
     
     return defaults
 
 # Backwards compatibility
 DB_CONFIG = load_database_config()
-DEFAULT_MONITOR_INTERFACE = load_settings_config().get("monitor_interface", "br-zoplog")
-SETTINGS_FILE = "/opt/zoplog/settings.json"  # For writing updates
+DEFAULT_MONITOR_INTERFACE = load_settings_config().get("monitor_interface", "eth0")

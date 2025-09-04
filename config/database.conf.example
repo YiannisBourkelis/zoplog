@@ -1,6 +1,6 @@
-# ZopLog Database Configuration
+# ZopLog Centralized Configuration
 # This file should be placed at /etc/zoplog/database.conf
-# with permissions 640 and ownership zoplog:www-data
+# with permissions 640 and ownership root:www-data
 
 [database]
 host = localhost

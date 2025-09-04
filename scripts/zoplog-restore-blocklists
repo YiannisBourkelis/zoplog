@@ -4,11 +4,15 @@
 
 set -euo pipefail
 
-# Source database credentials
-if [[ -f "/opt/zoplog/.db_credentials" ]]; then
-    source /opt/zoplog/.db_credentials
+# Source database credentials from centralized config
+if [[ -f "/etc/zoplog/database.conf" ]]; then
+    # Parse INI format configuration
+    DB_HOST=$(grep "^host" /etc/zoplog/database.conf | cut -d'=' -f2 | xargs)
+    DB_USER=$(grep "^user" /etc/zoplog/database.conf | cut -d'=' -f2 | xargs)
+    DB_PASS=$(grep "^password" /etc/zoplog/database.conf | cut -d'=' -f2 | xargs)
+    DB_NAME=$(grep "^name" /etc/zoplog/database.conf | cut -d'=' -f2 | xargs)
 else
-    echo "Database credentials not found" >&2
+    echo "Database configuration not found at /etc/zoplog/database.conf" >&2
     exit 1
 fi
 
