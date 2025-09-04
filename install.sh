@@ -384,19 +384,30 @@ setup_python_environment() {
         mysql-connector-python \
         systemd-python
     
-    # Create updated config.py with system settings support
+    # Create updated config.py with centralized configuration support
     cat > config.py <<EOF
 # --- DB connection settings ---
-DB_CONFIG = {
-    "host": "localhost",
-    "user": "$DB_USER",
-    "password": "$DB_PASS",
-    "database": "$DB_NAME"
-}
+# Use centralized configuration loader
+from zoplog_config import load_database_config
+
+DB_CONFIG = load_database_config()
 
 # --- System settings ---
-# Default monitoring interface (will be overridden by centralized config)
-DEFAULT_MONITOR_INTERFACE = "eth0"
+# Use centralized configuration
+from zoplog_config import load_settings_config
+import os
+
+# Default monitoring interface (will be overridden by web settings)
+_settings = load_settings_config()
+DEFAULT_MONITOR_INTERFACE = _settings.get("monitor_interface", "eth0")
+
+# Settings file path for system configuration
+# Use local settings.json in development, centralized path in production
+if os.path.exists("/etc/zoplog/settings.json"):
+    SETTINGS_FILE = "/etc/zoplog/settings.json"
+else:
+    # Development fallback - use project root settings.json
+    SETTINGS_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "settings.json")
 EOF
     
     chown "$ZOPLOG_USER:$ZOPLOG_USER" config.py
