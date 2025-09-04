@@ -312,7 +312,7 @@ setup_centralized_config() {
 [database]
 host = localhost
 user = $DB_USER
-password = $DB_PASS
+password = "$DB_PASS"
 name = $DB_NAME
 port = 3306
 
@@ -351,6 +351,16 @@ EOF
     
     # Allow zoplog user to read the config by adding to www-data group
     usermod -a -G www-data "$ZOPLOG_USER" 2>/dev/null || true
+    
+    # Save database credentials for backup/reference
+    cat > "$ZOPLOG_HOME/.db_credentials" <<EOF
+DB_HOST=localhost
+DB_NAME=$DB_NAME
+DB_USER=$DB_USER
+DB_PASS=$DB_PASS
+EOF
+    chown "$ZOPLOG_USER:$ZOPLOG_USER" "$ZOPLOG_HOME/.db_credentials"
+    chmod 600 "$ZOPLOG_HOME/.db_credentials"
     
     # Ensure proper ownership of downloaded files
     chown -R "$ZOPLOG_USER:$ZOPLOG_USER" "$ZOPLOG_HOME/zoplog"
