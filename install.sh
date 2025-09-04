@@ -447,7 +447,6 @@ www-data ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u zoplog-logger*
 www-data ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u zoplog-blockreader*
 # Allow www-data to fix configuration permissions
 www-data ALL=(ALL) NOPASSWD: /bin/chmod 660 /etc/zoplog/zoplog.conf
-www-data ALL=(ALL) NOPASSWD: /bin/chown root:www-data /etc/zoplog/zoplog.conf
 EOF
     
     # Set proper permissions for sudoers file

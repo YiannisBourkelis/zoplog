@@ -280,8 +280,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($_POST['action'] === 'fix_config_permissions') {
             // Fix configuration file permissions
             $commands = [
-                'sudo chmod 660 /etc/zoplog/zoplog.conf',
-                'sudo chown root:www-data /etc/zoplog/zoplog.conf'
+                'sudo chmod 660 /etc/zoplog/zoplog.conf'
             ];
             
             $outputs = [];
