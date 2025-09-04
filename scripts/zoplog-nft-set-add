@@ -1,0 +1,25 @@
+# (placeholder)
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 3 ]]; then
+	echo "usage: $0 <v4|v6> <set_name> <ip>" >&2
+	exit 2
+fi
+
+fam="$1"; setname="$2"; ip="$3"
+TABLE="zoplog"
+
+if [[ "$fam" != "v4" && "$fam" != "v6" ]]; then
+	echo "family must be v4 or v6" >&2
+	exit 2
+fi
+
+nft list table inet "$TABLE" >/dev/null 2>&1 || nft add table inet "$TABLE"
+if [[ "$fam" == "v4" ]]; then
+	nft list set inet "$TABLE" "$setname" >/dev/null 2>&1 || nft add set inet "$TABLE" "$setname" '{ type ipv4_addr; flags interval; }'
+	nft add element inet "$TABLE" "$setname" { "$ip" } 2>/dev/null || true
+else
+	nft list set inet "$TABLE" "$setname" >/dev/null 2>&1 || nft add set inet "$TABLE" "$setname" '{ type ipv6_addr; flags interval; }'
+	nft add element inet "$TABLE" "$setname" { "$ip" } 2>/dev/null || true
+fi

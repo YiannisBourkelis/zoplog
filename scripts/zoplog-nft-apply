@@ -1,0 +1,8 @@
+# Ensure base table and chains exist
+TABLE="zoplog"
+nft list table inet "$TABLE" >/dev/null 2>&1 || nft add table inet "$TABLE"
+nft list chain inet "$TABLE" input  >/dev/null 2>&1 || nft add chain inet "$TABLE" input  '{ type filter hook input  priority 0; policy accept; }'
+nft list chain inet "$TABLE" output >/dev/null 2>&1 || nft add chain inet "$TABLE" output '{ type filter hook output priority 0; policy accept; }'
+
+# No-op otherwise; autosave current ruleset if helper present
+/usr/local/sbin/zoplog-nft-autosave post-apply >/dev/null 2>&1 || true

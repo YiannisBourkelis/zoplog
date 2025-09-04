@@ -1,13 +1,13 @@
 <?php
 // system_settings.php - System configuration page
-require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/zoplog_config.php';
 
 $message = '';
 $messageType = '';
 
 // Load current settings
 function loadSystemSettings() {
-    $settingsFile = '/home/yiannis/projects/zoplog/settings.json';
+    $settingsFile = '/opt/zoplog/settings.json';
     $defaults = [
         'monitor_interface' => 'br-zoplog',
         'last_updated' => null
@@ -54,7 +54,7 @@ function getAvailableInterfaces() {
 
 // Save settings
 function saveSystemSettings($settings) {
-    $settingsFile = '/home/yiannis/projects/zoplog/settings.json';
+    $settingsFile = '/opt/zoplog/settings.json';
     $settingsDir = dirname($settingsFile);
     
     // Ensure directory exists
@@ -127,7 +127,7 @@ except Exception as e:
     chmod($testScript, 0755);
     
     // Run the test
-    $output = shell_exec("cd /opt/zoplog/zoplog/python-logger && source venv/bin/activate && python3 $testScript 2>&1");
+    $output = shell_exec("bash -lc 'cd /opt/zoplog/zoplog/python-logger && . venv/bin/activate && python3 $testScript' 2>&1");
     unlink($testScript);
     
     return $output;
@@ -146,7 +146,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ];
                 
                 // Debug information
-                $settingsFile = '/home/yiannis/projects/zoplog/settings.json';
+                $settingsFile = '/opt/zoplog/settings.json';
                 $settingsDir = dirname($settingsFile);
                 
                 // Check permissions and directory
@@ -237,10 +237,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($_POST['action'] === 'fix_permissions') {
             // Try to fix permissions and create settings file
             $commands = [
-                'sudo mkdir -p /home/yiannis/projects/zoplog',
-                'sudo touch /home/yiannis/projects/zoplog/settings.json',
-                'sudo chown yiannis:www-data /home/yiannis/projects/zoplog/settings.json',
-                'sudo chmod 664 /home/yiannis/projects/zoplog/settings.json'
+                'sudo mkdir -p /opt/zoplog',
+                'sudo touch /opt/zoplog/settings.json',
+                'sudo chown zoplog:www-data /opt/zoplog/settings.json',
+                'sudo chmod 664 /opt/zoplog/settings.json'
             ];
             
             $outputs = [];
@@ -251,7 +251,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             // Create initial settings content
             $initialSettings = ['monitor_interface' => 'br-zoplog', 'last_updated' => date('Y-m-d H:i:s')];
-            $result = shell_exec('echo \'' . json_encode($initialSettings, JSON_PRETTY_PRINT) . '\' | sudo tee /home/yiannis/projects/zoplog/settings.json > /dev/null 2>&1');
+            $json = json_encode($initialSettings, JSON_PRETTY_PRINT);
+            $tmp = tempnam(sys_get_temp_dir(), 'zoplog');
+            file_put_contents($tmp, $json);
+            // Move with sudo to ensure permissions
+            shell_exec('sudo mv ' . escapeshellarg($tmp) . ' /opt/zoplog/settings.json 2>&1');
             
             $message = "Permission fix attempted:\n" . implode("\n", $outputs);
             $messageType = 'info';

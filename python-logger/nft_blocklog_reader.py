@@ -12,7 +12,10 @@ import re
 import sys
 from typing import Dict, Optional, Tuple
 
-from config import DB_CONFIG
+from zoplog_config import load_database_config
+
+# Get database configuration
+DB_CONFIG = load_database_config()
 
 # DB driver (PyMySQL preferred; fallback to mysql-connector)
 try:

@@ -2,7 +2,7 @@
 // add_blocklist.php - Handle adding a new block list
 // Expects POST: url (required), category (required), description (optional)
 
-require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/zoplog_config.php';
 
 function respond_json($status, $message, $extra = []) {
     header('Content-Type: application/json');

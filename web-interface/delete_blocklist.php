@@ -1,6 +1,6 @@
 <?php
 // delete_blocklist.php - Delete a blocklist and its domains
-require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/zoplog_config.php';
 header('Content-Type: application/json');
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {

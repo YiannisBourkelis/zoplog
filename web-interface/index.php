@@ -4,7 +4,7 @@ error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
 // Use centralized DB config/connection
-require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/zoplog_config.php';
 
 // Total requests (allowed + blocked normalized)
 $allowedRes = $mysqli->query("SELECT COUNT(*) AS cnt FROM packet_logs");

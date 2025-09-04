@@ -2,7 +2,7 @@
 header("Content-Type: application/json");
 
 // Database connection via centralized helper
-require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/zoplog_config.php';
 
 // Get parameters
 $offset = intval($_GET["offset"] ?? 0);

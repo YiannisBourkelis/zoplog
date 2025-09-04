@@ -1,6 +1,6 @@
 <?php
 // blocklist_view.php - show and edit a single blocklist; search and paginate domains
-require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/zoplog_config.php';
 
 // Allowed categories (keep in sync with add_blocklist.php)
 $allowedCategories = [

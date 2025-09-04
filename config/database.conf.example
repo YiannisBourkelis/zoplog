@@ -1,0 +1,14 @@
+# ZopLog Database Configuration
+# This file should be placed at /etc/zoplog/database.conf
+# with permissions 640 and ownership zoplog:www-data
+
+[database]
+host = localhost
+user = zoplog_db
+password = your_password_here
+name = logs_db
+port = 3306
+
+[logging]
+# Optional: centralized logging level
+level = INFO

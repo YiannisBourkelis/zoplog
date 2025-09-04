@@ -2,7 +2,7 @@
 // api/realtime_data.php - Real-time data API for complete dashboard
 header('Content-Type: application/json');
 
-require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../zoplog_config.php';
 
 // System Resources Monitoring Function
 function getSystemMetrics() {

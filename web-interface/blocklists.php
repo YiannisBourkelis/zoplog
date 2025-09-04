@@ -1,6 +1,6 @@
 <?php
 // blocklists.php - list and manage blocklists
-require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/zoplog_config.php';
 
 // Fetch blocklists with domain counts
 $res = $mysqli->query("SELECT id, url, description, category, active, created_at, updated_at,
