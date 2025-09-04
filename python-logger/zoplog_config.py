@@ -12,6 +12,13 @@ DEFAULT_CONFIG_PATHS = [
     "/etc/zoplog/database.conf",
 ]
 
+def _strip_quotes(value: str) -> str:
+    """Strip surrounding quotes from a string value"""
+    if value and len(value) >= 2:
+        if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+            return value[1:-1]
+    return value
+
 def load_database_config() -> Dict[str, Any]:
     """Load database configuration from centralized location"""
     config = {
@@ -35,7 +42,7 @@ def load_database_config() -> Dict[str, Any]:
                         config.update({
                             "host": db_section.get('host', config['host']),
                             "user": db_section.get('user', config['user']),
-                            "password": db_section.get('password', config['password']),
+                            "password": _strip_quotes(db_section.get('password', config['password'])),
                             "database": db_section.get('name', config['database']),
                             "port": int(db_section.get('port', config['port'])),
                         })
@@ -50,7 +57,7 @@ def load_database_config() -> Dict[str, Any]:
                             if '=' in line:
                                 key, value = line.split('=', 1)
                                 key = key.strip().upper()
-                                value = value.strip()
+                                value = _strip_quotes(value.strip())
                                 if key in ('DB_HOST', 'HOST'):
                                     config['host'] = value
                                 elif key in ('DB_USER', 'USER'):
