@@ -491,7 +491,7 @@ Defaults:zoplog !audit
 Defaults:www-data !audit
 
 # ZopLog firewall management for logger service
-$ZOPLOG_USER ALL=(root) NOPASSWD: /usr/local/sbin/zoplog-firewall-ipset-add
+zoplog ALL=(root) NOPASSWD: /usr/local/sbin/zoplog-firewall-ipset-add
 
 # ZopLog firewall management for web interface
 www-data ALL=(root) NOPASSWD: /usr/local/sbin/zoplog-firewall-*
