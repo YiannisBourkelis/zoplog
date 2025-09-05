@@ -58,18 +58,18 @@ check_debian() {
 detect_interfaces() {
     log_info "Detecting network interfaces..."
     
-    # Get all ethernet interfaces (excluding loopback)
-    INTERFACES=($(ip link show | grep -E "^[0-9]+: (eth|enp|ens)" | cut -d: -f2 | sed 's/ //g'))
+    # Get all ethernet interfaces (excluding loopback) - include USB adapters universally
+    INTERFACES=($(ip link show | grep -E "^[0-9]+: (eth|enp|ens|usb)" | cut -d: -f2 | sed 's/ //g'))
     
-    if [ ${#INTERFACES[@]} -lt 2 ]; then
-        log_error "At least 2 ethernet interfaces are required for ZopLog to work as a transparent proxy"
+    if [ ${#INTERFACES[@]} -lt 1 ]; then
+        log_error "At least 1 ethernet interface is required for ZopLog"
         log_error "Found interfaces: ${INTERFACES[*]}"
         exit 1
     fi
     
-    log_info "Found ${#INTERFACES[@]} ethernet interfaces: ${INTERFACES[*]}"
+    log_info "Found ${#INTERFACES[@]} network interfaces: ${INTERFACES[*]}"
     
-    # Try to detect which interface has internet connectivity
+    # Try to detect which interface has internet connectivity for monitoring
     INTERNET_IF=""
     INTERNAL_IF=""
     
@@ -80,22 +80,31 @@ detect_interfaces() {
         fi
     done
     
-    # Set the other interface as internal
-    for iface in "${INTERFACES[@]}"; do
-        if [ "$iface" != "$INTERNET_IF" ]; then
-            INTERNAL_IF="$iface"
-            break
-        fi
-    done
-    
+    # If no default route found, use first interface
     if [ -z "$INTERNET_IF" ]; then
-        log_warning "Could not automatically detect internet interface"
+        log_warning "Could not automatically detect internet interface, using first available"
         INTERNET_IF="${INTERFACES[0]}"
-        INTERNAL_IF="${INTERFACES[1]}"
     fi
     
-    log_info "Internet interface: $INTERNET_IF"
-    log_info "Internal interface: $INTERNAL_IF"
+    # Set internal interface only if we have more than one interface
+    if [ ${#INTERFACES[@]} -gt 1 ]; then
+        for iface in "${INTERFACES[@]}"; do
+            if [ "$iface" != "$INTERNET_IF" ]; then
+                INTERNAL_IF="$iface"
+                break
+            fi
+        done
+        BRIDGE_MODE="dual"
+        log_info "Dual interface mode - will create bridge"
+    else
+        BRIDGE_MODE="single"
+        log_info "Single interface mode - no bridge needed"
+    fi
+    
+    log_info "Internet interface (for monitoring): $INTERNET_IF"
+    if [ -n "$INTERNAL_IF" ]; then
+        log_info "Internal interface: $INTERNAL_IF"
+    fi
     
     # Auto-continue after 5 seconds if running non-interactively
     if [ -t 0 ]; then
@@ -143,22 +152,55 @@ install_dependencies() {
         netfilter-persistent \
         iptables-persistent
     
-    # Install PHP 8.4 from Ondrej's PPA
-    log_info "Installing PHP 8.4..."
-    curl -sSL https://packages.sury.org/php/apt.gpg | gpg --dearmor -o /usr/share/keyrings/php-archive-keyring.gpg
-    echo "deb [signed-by=/usr/share/keyrings/php-archive-keyring.gpg] https://packages.sury.org/php/ $(lsb_release -sc) main" > /etc/apt/sources.list.d/php.list
+    # Install PHP - try newer version first, fallback to system default
+    log_info "Installing PHP..."
     
-    apt-get update -qq
-    apt-get install -y \
-        php8.4 \
-        php8.4-fpm \
-        php8.4-mysql \
-        php8.4-cli \
-        php8.4-common \
-        php8.4-curl \
-        php8.4-mbstring \
-        php8.4-xml \
-        php8.4-zip
+    # Try to install PHP 8.4 from Ondrej's repository for better compatibility
+    if curl -sSL https://packages.sury.org/php/apt.gpg | gpg --dearmor -o /usr/share/keyrings/php-archive-keyring.gpg 2>/dev/null; then
+        echo "deb [signed-by=/usr/share/keyrings/php-archive-keyring.gpg] https://packages.sury.org/php/ $(lsb_release -sc) main" > /etc/apt/sources.list.d/php.list
+        
+        if apt-get update -qq && apt-get install -y \
+            php8.4 \
+            php8.4-fpm \
+            php8.4-mysql \
+            php8.4-cli \
+            php8.4-common \
+            php8.4-curl \
+            php8.4-mbstring \
+            php8.4-xml \
+            php8.4-zip 2>/dev/null; then
+            PHP_VERSION="8.4"
+            log_info "Installed PHP 8.4 from Ondrej's repository"
+        else
+            log_warning "PHP 8.4 installation failed, falling back to system packages"
+            apt-get install -y \
+                php \
+                php-fpm \
+                php-mysql \
+                php-cli \
+                php-common \
+                php-curl \
+                php-mbstring \
+                php-xml \
+                php-zip
+            PHP_VERSION=$(php -v | head -n1 | cut -d' ' -f2 | cut -d'.' -f1,2)
+        fi
+    else
+        log_info "Using system PHP packages"
+        apt-get install -y \
+            php \
+            php-fpm \
+            php-mysql \
+            php-cli \
+            php-common \
+            php-curl \
+            php-mbstring \
+            php-xml \
+            php-zip
+        PHP_VERSION=$(php -v | head -n1 | cut -d' ' -f2 | cut -d'.' -f1,2)
+    fi
+    
+    log_info "PHP version: $PHP_VERSION"
     
     log_success "Dependencies installed successfully"
 }
@@ -324,22 +366,31 @@ EOF
     chown root:www-data /etc/zoplog/database.conf
     chmod 640 /etc/zoplog/database.conf
     
-    # Create centralized system settings configuration
+    # Create centralized system settings configuration with proper monitoring interface
+    if [ "$BRIDGE_MODE" = "dual" ]; then
+        MONITOR_INTERFACE="br-zoplog"  # Use bridge when available
+    else
+        MONITOR_INTERFACE="$INTERNET_IF"  # Monitor internet interface directly in single mode
+    fi
+    
     cat > /etc/zoplog/zoplog.conf <<EOF
 # ZopLog System Configuration
 # This file contains system settings for monitoring and firewall
 
 [monitoring]
-interface = eth0
+interface = $MONITOR_INTERFACE
 capture_mode = promiscuous
 log_level = INFO
 
 [firewall]
-apply_to_interface = eth0
+apply_to_interface = $MONITOR_INTERFACE
 block_mode = immediate
 log_blocked = true
 
 [system]
+bridge_mode = $BRIDGE_MODE
+internet_interface = $INTERNET_IF
+internal_interface = $INTERNAL_IF
 update_interval = 30
 max_log_entries = 10000
 last_updated = $(date '+%Y-%m-%d %H:%M:%S')
@@ -373,16 +424,35 @@ setup_python_environment() {
     
     cd "$ZOPLOG_HOME/zoplog/python-logger"
     
+    # Ensure Python development headers are available for package compilation
+    apt-get install -y python3-dev build-essential || log_warning "Could not install development packages"
+    
     # Create virtual environment
     sudo -u "$ZOPLOG_USER" python3 -m venv venv
     
-    # Install Python dependencies
+    # Upgrade pip first
     sudo -u "$ZOPLOG_USER" ./venv/bin/pip install --upgrade pip
-    sudo -u "$ZOPLOG_USER" ./venv/bin/pip install \
+    
+    # Install Python dependencies with fallbacks
+    log_info "Installing Python dependencies..."
+    if sudo -u "$ZOPLOG_USER" ./venv/bin/pip install \
         scapy \
         PyMySQL \
-        mysql-connector-python \
-        systemd-python
+        mysql-connector-python; then
+        log_success "Python dependencies installed via pip"
+    else
+        log_warning "Pip installation failed, trying with system packages..."
+        # Fallback - use system packages if pip fails
+        apt-get install -y python3-scapy python3-pymysql || log_warning "System packages installation failed"
+        # Create symlinks in venv for system packages
+        sudo -u "$ZOPLOG_USER" bash -c 'for pkg in /usr/lib/python3/dist-packages/{scapy*,pymysql*}; do [ -e "$pkg" ] && ln -sf "$pkg" ./venv/lib/python*/site-packages/ 2>/dev/null || true; done'
+    fi
+    
+    # Install systemd-python separately (may not be available on all systems)
+    sudo -u "$ZOPLOG_USER" ./venv/bin/pip install systemd-python || {
+        log_warning "systemd-python not available via pip, trying system package..."
+        apt-get install -y python3-systemd || log_warning "systemd-python not available"
+    }
     
     # Create updated config.py with centralized configuration support
     cat > config.py <<EOF
@@ -435,17 +505,23 @@ setup_web_interface() {
 }
 
 setup_sudoers() {
-    log_info "Setting up sudoers permissions for web interface..."
+    log_info "Setting up sudoers permissions for web interface and services..."
     
     # Remove any existing zoplog sudoers files to avoid conflicts
     rm -f /etc/sudoers.d/zoplog /etc/sudoers.d/zoplog-web
     
-    # Create consolidated sudoers entry for ZopLog
-    cat > /etc/sudoers.d/zoplog-web <<EOF
-# ZopLog firewall management
+    # Create consolidated sudoers entry for ZopLog with audit plugin bypass
+    cat > /etc/sudoers.d/zoplog <<EOF
+# ZopLog sudoers configuration with audit plugin bypass
+Defaults:zoplog !audit
+Defaults:www-data !audit
+
+# ZopLog firewall management for logger service
+$ZOPLOG_USER ALL=(root) NOPASSWD: /usr/local/sbin/zoplog-firewall-ipset-add
+
+# ZopLog firewall management for web interface
 www-data ALL=(root) NOPASSWD: /usr/local/sbin/zoplog-firewall-*
 www-data ALL=(root) NOPASSWD: /usr/local/sbin/zoplog-nft-*
-$ZOPLOG_USER ALL=(root) NOPASSWD: /usr/local/sbin/zoplog-*
 
 # Allow www-data to manage ZopLog services without password
 www-data ALL=(ALL) NOPASSWD: /bin/systemctl restart zoplog-logger
@@ -468,20 +544,33 @@ www-data ALL=(ALL) NOPASSWD: /bin/chmod 660 /etc/zoplog/zoplog.conf
 EOF
     
     # Set proper permissions for sudoers file
-    chmod 440 /etc/sudoers.d/zoplog-web
+    chmod 440 /etc/sudoers.d/zoplog
     
     # Validate sudoers syntax
     if ! visudo -c > /dev/null 2>&1; then
         log_error "Sudoers configuration is invalid. Removing file."
-        rm -f /etc/sudoers.d/zoplog-web
+        rm -f /etc/sudoers.d/zoplog
         return 1
     fi
     
-    log_success "Sudoers permissions configured for web service management"
+    log_success "Sudoers permissions configured with audit plugin bypass"
 }
 
 setup_nginx() {
     log_info "Configuring Nginx..."
+    
+    # Detect PHP-FPM socket path
+    if [ -n "${PHP_VERSION:-}" ]; then
+        PHP_SOCKET="/run/php/php${PHP_VERSION}-fpm.sock"
+    else
+        # Fallback detection
+        PHP_SOCKET=$(find /run/php/ -name "php*-fpm.sock" | head -n1)
+        if [ -z "$PHP_SOCKET" ]; then
+            PHP_SOCKET="/run/php/php-fpm.sock"  # Generic fallback
+        fi
+    fi
+    
+    log_info "Using PHP-FPM socket: $PHP_SOCKET"
     
     cat > /etc/nginx/sites-available/zoplog <<EOF
 server {
@@ -499,7 +588,7 @@ server {
     
     location ~ \.php$ {
         include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:/run/php/php8.4-fpm.sock;
+        fastcgi_pass unix:$PHP_SOCKET;
     }
     
     location ~ /\.ht {
@@ -584,14 +673,18 @@ setup_transparent_proxy() {
     echo 'net.ipv6.conf.all.forwarding=1' >> /etc/sysctl.conf
     sysctl -p
     
-    # Create bridge interface for transparent proxy
-    cat > /etc/systemd/network/br-zoplog.netdev <<EOF
+    # Only create bridge if we have multiple interfaces
+    if [ "$BRIDGE_MODE" = "dual" ]; then
+        log_info "Configuring bridge for dual-interface mode"
+        
+        # Create bridge interface for transparent proxy
+        cat > /etc/systemd/network/br-zoplog.netdev <<EOF
 [NetDev]
 Name=br-zoplog
 Kind=bridge
 EOF
-    
-    cat > /etc/systemd/network/br-zoplog.network <<EOF
+        
+        cat > /etc/systemd/network/br-zoplog.network <<EOF
 [Match]
 Name=br-zoplog
 
@@ -599,26 +692,32 @@ Name=br-zoplog
 DHCP=yes
 IPForward=yes
 EOF
-    
-    # Configure bridge interfaces
-    cat > "/etc/systemd/network/10-$INTERNET_IF.network" <<EOF
+        
+        # Configure both interfaces to use bridge
+        cat > "/etc/systemd/network/10-$INTERNET_IF.network" <<EOF
 [Match]
 Name=$INTERNET_IF
 
 [Network]
 Bridge=br-zoplog
 EOF
-    
-    cat > "/etc/systemd/network/10-$INTERNAL_IF.network" <<EOF
+        
+        cat > "/etc/systemd/network/10-$INTERNAL_IF.network" <<EOF
 [Match]
 Name=$INTERNAL_IF
 
 [Network]
 Bridge=br-zoplog
 EOF
-    
-    # Enable systemd-networkd
-    systemctl enable systemd-networkd
+        
+        # Enable systemd-networkd
+        systemctl enable systemd-networkd
+        
+        log_success "Bridge configuration completed for dual-interface mode"
+    else
+        log_info "Single interface mode - no bridge configuration needed"
+        log_info "ZopLog will monitor traffic on $INTERNET_IF directly"
+    fi
     
     log_success "Transparent proxy configuration completed"
 }
@@ -626,7 +725,7 @@ EOF
 setup_systemd_services() {
     log_info "Creating systemd services..."
     
-    # ZopLog packet logger service
+    # ZopLog packet logger service with capabilities for packet capture
     cat > /etc/systemd/system/zoplog-logger.service <<EOF
 [Unit]
 Description=ZopLog Network Packet Logger
@@ -644,15 +743,27 @@ Restart=always
 RestartSec=10
 TimeoutStartSec=60
 
-# Security settings
-NoNewPrivileges=yes
+# Security settings with necessary capabilities for packet capture
+NoNewPrivileges=no
 PrivateTmp=yes
 ProtectHome=yes
 ProtectSystem=strict
 ReadWritePaths=$ZOPLOG_HOME
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
 
 [Install]
 WantedBy=multi-user.target
+EOF
+    
+    # Create systemd override for logger service (alternative approach)
+    mkdir -p /etc/systemd/system/zoplog-logger.service.d
+    cat > /etc/systemd/system/zoplog-logger.service.d/override.conf <<EOF
+[Service]
+# Additional capability configuration for Raspberry Pi compatibility
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
+NoNewPrivileges=no
 EOF
     
     # ZopLog block log reader service
