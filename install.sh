@@ -413,8 +413,10 @@ EOF
     chown "$ZOPLOG_USER:$ZOPLOG_USER" "$ZOPLOG_HOME/.db_credentials"
     chmod 600 "$ZOPLOG_HOME/.db_credentials"
     
-    # Ensure proper ownership of downloaded files
-    chown -R "$ZOPLOG_USER:$ZOPLOG_USER" "$ZOPLOG_HOME/zoplog"
+    # Ensure proper ownership of downloaded files (only if directory exists)
+    if [ -d "$ZOPLOG_HOME/zoplog" ]; then
+        chown -R "$ZOPLOG_USER:$ZOPLOG_USER" "$ZOPLOG_HOME/zoplog"
+    fi
     
     log_success "Centralized configuration setup complete"
 }
@@ -453,34 +455,6 @@ setup_python_environment() {
         log_warning "systemd-python not available via pip, trying system package..."
         apt-get install -y python3-systemd || log_warning "systemd-python not available"
     }
-    
-    # Create updated config.py with centralized configuration support
-    cat > config.py <<EOF
-# --- DB connection settings ---
-# Use centralized configuration loader
-from zoplog_config import load_database_config
-
-DB_CONFIG = load_database_config()
-
-# --- System settings ---
-# Use centralized configuration
-from zoplog_config import load_settings_config
-import os
-
-# Default monitoring interface (will be overridden by web settings)
-_settings = load_settings_config()
-DEFAULT_MONITOR_INTERFACE = _settings.get("monitor_interface", "eth0")
-
-# Settings file path for system configuration
-# Use local settings.json in development, centralized path in production
-if os.path.exists("/etc/zoplog/settings.json"):
-    SETTINGS_FILE = "/etc/zoplog/settings.json"
-else:
-    # Development fallback - use project root settings.json
-    SETTINGS_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "settings.json")
-EOF
-    
-    chown "$ZOPLOG_USER:$ZOPLOG_USER" config.py
     
     log_success "Python environment setup completed"
 }
