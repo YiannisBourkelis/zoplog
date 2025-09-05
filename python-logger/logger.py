@@ -235,28 +235,45 @@ def _record_blocked_ip(blocklist_domain_id: int, ip: str):
 
 def ipset_add_ip(blocklist_id: int, ip: str, blocklist_domain_id: int | None = None):
     """Add IP to nft set for blocklist and record it in DB linked to the specific domain when provided."""
+    print(f"DEBUG: ipset_add_ip called with blocklist_id={blocklist_id}, ip={ip}, domain_id={blocklist_domain_id}")
+    
     # First try to apply firewall change
     try:
+        cmd = ["sudo", "/usr/local/sbin/zoplog-firewall-ipset-add", str(blocklist_id), ip]
+        print(f"DEBUG: Executing command: {' '.join(cmd)}")
+        
         result = subprocess.run(
-            ["sudo", "-n", "/usr/local/sbin/zoplog-firewall-ipset-add", str(blocklist_id), ip],
+            cmd,
             capture_output=True,
             text=True,
             timeout=2,
         )
+        
+        print(f"DEBUG: Command completed - returncode={result.returncode}")
+        print(f"DEBUG: stdout: {repr(result.stdout)}")
+        print(f"DEBUG: stderr: {repr(result.stderr)}")
+        
         if result.returncode != 0:
             err = (result.stderr or '').strip()
-            print(f"ipset add failed rc={result.returncode} id={blocklist_id} ip={ip} {err}")
+            print(f"ERROR: ipset add failed rc={result.returncode} id={blocklist_id} ip={ip} stderr={err}")
+        else:
+            print(f"SUCCESS: ipset add completed successfully for id={blocklist_id} ip={ip}")
+            
     except subprocess.TimeoutExpired:
-        print(f"ipset add timed out id={blocklist_id} ip={ip}")
+        print(f"ERROR: ipset add timed out id={blocklist_id} ip={ip}")
     except Exception as e:
-        print(f"ipset add error id={blocklist_id} ip={ip} err={e}")
+        print(f"ERROR: ipset add exception id={blocklist_id} ip={ip} err={e}")
 
     # Independently record in DB (even if firewall fails, for observability)
     if blocklist_domain_id:
         try:
+            print(f"DEBUG: Recording blocked IP in database for domain_id={blocklist_domain_id}")
             _record_blocked_ip(blocklist_domain_id, ip)
+            print(f"DEBUG: Successfully recorded blocked IP in database")
         except Exception as e:
-            print(f"record blocked_ip error domain_id={blocklist_domain_id} ip={ip} err={e}")
+            print(f"ERROR: record blocked_ip error domain_id={blocklist_domain_id} ip={ip} err={e}")
+    else:
+        print(f"DEBUG: No blocklist_domain_id provided, skipping database record")
 
 # --- Packet logging ---
 def _get_ips(packet):
