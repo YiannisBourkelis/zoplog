@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  echo "usage: $0 <blocklist_id>" >&2
+  exit 2
+fi
+
+id="$1"
+if ! [[ "$id" =~ ^[0-9]+$ ]]; then
+  echo "invalid id: $id" >&2
+  exit 2
+fi
+
+TABLE="zoplog"
+SET_V4="zoplog-blocklist-${id}-v4"
+SET_V6="zoplog-blocklist-${id}-v6"
+
+# Load firewall interface from centralized config
+FIREWALL_INTERFACE=""
+if [[ -f "/etc/zoplog/zoplog.conf" ]]; then
+  FIREWALL_INTERFACE=$(grep "^apply_to_interface" /etc/zoplog/zoplog.conf 2>/dev/null | cut -d'=' -f2 | xargs || echo "")
+fi
+
+# Fallback to eth0 if not configured
+if [[ -z "$FIREWALL_INTERFACE" ]]; then
+  FIREWALL_INTERFACE="eth0"
+fi
+
+echo "Applying firewall rules to internet-facing interface: $FIREWALL_INTERFACE"
+
+# Ensure table and base chains exist
+/usr/sbin/nft list table inet "$TABLE" >/dev/null 2>&1 || /usr/sbin/nft add table inet "$TABLE"
+/usr/sbin/nft list chain inet "$TABLE" input   >/dev/null 2>&1 || /usr/sbin/nft add chain inet "$TABLE" input   '{ type filter hook input   priority 0; policy accept; }'
+/usr/sbin/nft list chain inet "$TABLE" output  >/dev/null 2>&1 || /usr/sbin/nft add chain inet "$TABLE" output  '{ type filter hook output  priority 0; policy accept; }'
+/usr/sbin/nft list chain inet "$TABLE" forward >/dev/null 2>&1 || /usr/sbin/nft add chain inet "$TABLE" forward '{ type filter hook forward priority 0; policy accept; }'
+
+# Ensure sets exist
+/usr/sbin/nft list set inet "$TABLE" "$SET_V4" >/dev/null 2>&1 || /usr/sbin/nft add set inet "$TABLE" "$SET_V4" '{ type ipv4_addr; flags interval; }'
+/usr/sbin/nft list set inet "$TABLE" "$SET_V6" >/dev/null 2>&1 || /usr/sbin/nft add set inet "$TABLE" "$SET_V6" '{ type ipv6_addr; flags interval; }'
+
+# Simple rule addition (without complex functions)
+COMMENT_BASE="zoplog-bl-${id}"
+
+# Check if rule exists by looking for the comment
+rule_exists() {
+  local chain="$1"
+  local comment="$2"
+  /usr/sbin/nft list chain inet "$TABLE" "$chain" 2>/dev/null | grep -Fq "comment \"$comment\""
+}
+
+# Add OUTPUT rules for blocking traffic to blocked IPs via internet-facing interface only
+# This ensures we only block internet-bound traffic, not internal bridge traffic
+if ! rule_exists "output" "${COMMENT_BASE}-output-v4-log"; then
+  /usr/sbin/nft add rule inet "$TABLE" output oifname "$FIREWALL_INTERFACE" ip daddr @"$SET_V4" log prefix "ZOPLOG-BLOCKLIST-OUT " level warn comment "${COMMENT_BASE}-output-v4-log"
+fi
+
+if ! rule_exists "output" "${COMMENT_BASE}-output-v4-drop"; then
+  /usr/sbin/nft add rule inet "$TABLE" output oifname "$FIREWALL_INTERFACE" ip daddr @"$SET_V4" drop comment "${COMMENT_BASE}-output-v4-drop"
+fi
+
+# Add FORWARD rules for blocking traffic forwarded through the internet-facing interface
+# This catches traffic from internal devices going to blocked internet destinations
+if ! rule_exists "forward" "${COMMENT_BASE}-forward-v4-log"; then
+  /usr/sbin/nft add rule inet "$TABLE" forward oifname "$FIREWALL_INTERFACE" ip daddr @"$SET_V4" log prefix "ZOPLOG-BLOCKLIST-FWD " level warn comment "${COMMENT_BASE}-forward-v4-log"
+fi
+
+if ! rule_exists "forward" "${COMMENT_BASE}-forward-v4-drop"; then
+  /usr/sbin/nft add rule inet "$TABLE" forward oifname "$FIREWALL_INTERFACE" ip daddr @"$SET_V4" drop comment "${COMMENT_BASE}-forward-v4-drop"
+fi
+
+echo "Firewall rules applied successfully for blocklist $id"

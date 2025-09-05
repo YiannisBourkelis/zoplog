@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # Ensure base table and chains exist
 TABLE="zoplog"
 nft list table inet "$TABLE" >/dev/null 2>&1 || nft add table inet "$TABLE"
