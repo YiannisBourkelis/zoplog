@@ -223,11 +223,11 @@ setup_database() {
     # Fast path: if centralized config exists and connects, skip DB setup
     if [ -f "/etc/zoplog/database.conf" ]; then
         log_info "Found existing centralized database configuration, testing connection..."
-        # Extract credentials from INI file
-        DB_HOST=$(grep "^host" /etc/zoplog/database.conf | cut -d'=' -f2 | xargs)
-        DB_USER=$(grep "^user" /etc/zoplog/database.conf | cut -d'=' -f2 | xargs)
-        DB_PASS=$(grep "^password" /etc/zoplog/database.conf | cut -d'=' -f2 | xargs)
-        DB_NAME=$(grep "^name" /etc/zoplog/database.conf | cut -d'=' -f2 | xargs)
+        # Extract credentials from INI file, removing quotes and whitespace
+        DB_HOST=$(grep "^host" /etc/zoplog/database.conf | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
+        DB_USER=$(grep "^user" /etc/zoplog/database.conf | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
+        DB_PASS=$(grep "^password" /etc/zoplog/database.conf | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
+        DB_NAME=$(grep "^name" /etc/zoplog/database.conf | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
         
         if mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -e "SELECT 1;" >/dev/null 2>&1; then
             log_success "Database already configured; skipping database setup"
