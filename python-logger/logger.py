@@ -339,50 +339,124 @@ def log_http_request(packet, settings: dict = None):
         print(f"error during ipset add for HTTP host={host} ip={dst_ip}: {e}")
 
 def extract_tls_sni(packet):
-    """Parse TLS ClientHello to extract SNI hostname efficiently."""
+    """Parse TLS ClientHello to extract SNI hostname with proper TLS structure parsing."""
     try:
         if not packet.haslayer(scapy.TCP) or not packet.haslayer(scapy.Raw):
             return None
         data = bytes(packet[scapy.Raw].load)
-        
-        # Quick length and type checks
-        if len(data) < 43 or data[0] != 0x16:  # Not a handshake record
-            return None
-        
-        # Check for ClientHello
-        if data[5] != 0x01:
+
+        # TLS record header: 5 bytes
+        if len(data) < 5 or data[0] != 0x16:  # ContentType 22 = handshake
             return None
 
-        # Skip to extensions (faster than detailed parsing)
-        idx = 43  # Skip fixed ClientHello header
+        # Handshake must be ClientHello (type 1)
+        if len(data) < 6 or data[5] != 0x01:
+            return None
+
+        idx = 5  # Start after record header
+
+        # Skip handshake message header (4 bytes: type, length)
+        if len(data) < idx + 4:
+            return None
+        hs_len = int.from_bytes(data[idx+1:idx+4], 'big')
+        idx += 4
+
+        # ClientHello structure:
+        # - Version (2 bytes)
+        # - Random (32 bytes)
+        # - Session ID length (1 byte)
+        # - Session ID (variable)
+        # - Cipher Suites length (2 bytes)
+        # - Cipher Suites (variable)
+        # - Compression Methods length (1 byte)
+        # - Compression Methods (variable)
+        # - Extensions length (2 bytes)
+        # - Extensions (variable)
+
+        # Skip version (2) + random (32)
+        if len(data) < idx + 2 + 32:
+            return None
+        idx += 2 + 32
+
+        # Session ID
+        if len(data) < idx + 1:
+            return None
+        sid_len = data[idx]
+        idx += 1
+        if len(data) < idx + sid_len:
+            return None
+        idx += sid_len
+
+        # Cipher Suites
         if len(data) < idx + 2:
             return None
-            
-        ext_len = int.from_bytes(data[idx:idx+2], 'big')
+        cs_len = int.from_bytes(data[idx:idx+2], 'big')
         idx += 2
-        end = idx + ext_len
-        
+        if len(data) < idx + cs_len:
+            return None
+        idx += cs_len
+
+        # Compression Methods
+        if len(data) < idx + 1:
+            return None
+        comp_len = data[idx]
+        idx += 1
+        if len(data) < idx + comp_len:
+            return None
+        idx += comp_len
+
+        # Extensions
+        if len(data) < idx + 2:
+            return None
+        ext_total_len = int.from_bytes(data[idx:idx+2], 'big')
+        idx += 2
+        end = idx + ext_total_len
+
         if end > len(data):
             return None
 
-        # Scan for SNI extension
+        # Scan extensions for SNI (type 0x0000)
         while idx + 4 <= end:
             ext_type = int.from_bytes(data[idx:idx+2], 'big')
-            if ext_type == 0x0000:  # SNI extension
-                ext_len = int.from_bytes(data[idx+2:idx+4], 'big')
-                ext_data_start = idx + 4
-                if ext_len >= 5:  # Minimum SNI structure
-                    # Skip server name list length (2 bytes) and name type (1 byte)
-                    name_len_start = ext_data_start + 3
-                    if name_len_start + 2 <= ext_data_start + ext_len:
-                        name_len = int.from_bytes(data[name_len_start:name_len_start+2], 'big')
-                        name_start = name_len_start + 2
-                        if name_start + name_len <= ext_data_start + ext_len:
-                            host_bytes = data[name_start:name_start+name_len]
-                            host = host_bytes.decode('utf-8', errors='ignore').strip().lower().rstrip('.')
-                            return host
+            ext_len = int.from_bytes(data[idx+2:idx+4], 'big')
+            ext_data_start = idx + 4
+            ext_data_end = ext_data_start + ext_len
+
+            if ext_data_end > end:
                 break
-            idx += 4 + int.from_bytes(data[idx+2:idx+4], 'big')
+
+            if ext_type == 0x0000:  # SNI extension
+                # SNI extension structure:
+                # - Server Name List Length (2 bytes)
+                # - Server Name Type (1 byte) - should be 0 for hostname
+                # - Server Name Length (2 bytes)
+                # - Server Name (variable)
+
+                if ext_len < 5:  # Minimum SNI structure
+                    break
+
+                # Skip server name list length (2 bytes)
+                sni_idx = ext_data_start + 2
+
+                if sni_idx + 3 > ext_data_end:
+                    break
+
+                name_type = data[sni_idx]
+                if name_type == 0x00:  # host_name
+                    name_len = int.from_bytes(data[sni_idx+1:sni_idx+3], 'big')
+                    name_start = sni_idx + 3
+
+                    if name_start + name_len <= ext_data_end:
+                        host_bytes = data[name_start:name_start+name_len]
+                        try:
+                            host = host_bytes.decode('utf-8', errors='ignore').strip().lower().rstrip('.')
+                            if host:  # Only return non-empty hostnames
+                                return host
+                        except:
+                            pass
+                break
+
+            idx = ext_data_end
 
         return None
     except Exception:
