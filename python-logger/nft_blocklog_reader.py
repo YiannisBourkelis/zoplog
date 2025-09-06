@@ -36,6 +36,7 @@ except Exception:
 
 PREFIX_IN = "ZOPLOG-BLOCKLIST-IN"
 PREFIX_OUT = "ZOPLOG-BLOCKLIST-OUT"
+PREFIX_FWD = "ZOPLOG-BLOCKLIST-FWD"
 
 def db_connect():
     conn = mariadb.connect(**DB_CONFIG)
@@ -54,7 +55,7 @@ def get_or_insert_ip(cursor, ip: Optional[str]) -> Optional[int]:
 
 # Inject a space right after the prefix token if glued (e.g., ...-OUTIN=)
 def _normalize_prefix_spacing(msg: str) -> str:
-    for pref in (PREFIX_IN, PREFIX_OUT):
+    for pref in (PREFIX_IN, PREFIX_OUT, PREFIX_FWD):
         i = msg.find(pref)
         if i != -1:
             j = i + len(pref)
@@ -65,18 +66,26 @@ def _normalize_prefix_spacing(msg: str) -> str:
 kv_re = re.compile(r"\b([A-Z]+)=([^\s]+)")
 
 def parse_log_line(line: str) -> Optional[Tuple[str, Dict[str, str]]]:
-    if PREFIX_IN not in line and PREFIX_OUT not in line:
+    if PREFIX_IN not in line and PREFIX_OUT not in line and PREFIX_FWD not in line:
         return None
     line = _normalize_prefix_spacing(line)
     # If both appear (rare), choose the first occurrence
     idx_in = line.find(PREFIX_IN)
     idx_out = line.find(PREFIX_OUT)
-    if idx_in == -1 and idx_out == -1:
+    idx_fwd = line.find(PREFIX_FWD)
+    if idx_in == -1 and idx_out == -1 and idx_fwd == -1:
         return None
-    if idx_in != -1 and (idx_out == -1 or idx_in < idx_out):
-        direction = "IN"
-    else:
-        direction = "OUT"
+    
+    # Determine direction based on first match
+    indices = [(idx_in, "IN"), (idx_out, "OUT"), (idx_fwd, "FWD")]
+    valid_indices = [(idx, dir) for idx, dir in indices if idx != -1]
+    if not valid_indices:
+        return None
+    
+    # Choose the first occurrence
+    valid_indices.sort(key=lambda x: x[0])
+    direction = valid_indices[0][1]
+    
     fields = {m.group(1): m.group(2) for m in kv_re.finditer(line)}
     return direction, fields
 
