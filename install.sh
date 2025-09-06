@@ -890,7 +890,7 @@ CREATE TABLE IF NOT EXISTS `blocked_events` (
   KEY `idx_dst_ip` (`dst_ip_id`),
   CONSTRAINT `fk_blocked_events_src_ip` FOREIGN KEY (`src_ip_id`) REFERENCES `ip_addresses` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_blocked_events_dst_ip` FOREIGN KEY (`dst_ip_id`) REFERENCES `ip_addresses` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 
 -- Blocklists table
 CREATE TABLE IF NOT EXISTS `blocklists` (
@@ -902,7 +902,7 @@ CREATE TABLE IF NOT EXISTS `blocklists` (
   `created_at` datetime NOT NULL,
   `updated_at` datetime NOT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 
 -- Blocklist domains table
 CREATE TABLE IF NOT EXISTS `blocklist_domains` (
@@ -913,7 +913,7 @@ CREATE TABLE IF NOT EXISTS `blocklist_domains` (
   UNIQUE KEY `uniq_blocklist_domain` (`blocklist_id`,`domain`),
   KEY `idx_blocklist_id` (`blocklist_id`),
   CONSTRAINT `fk_blocklist_domains_blocklists` FOREIGN KEY (`blocklist_id`) REFERENCES `blocklists` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 
 -- Blocked IPs table
 CREATE TABLE IF NOT EXISTS `blocked_ips` (
@@ -930,7 +930,7 @@ CREATE TABLE IF NOT EXISTS `blocked_ips` (
   KEY `idx_blocked_ips_ip` (`ip_id`),
   CONSTRAINT `fk_blocked_ips_domain` FOREIGN KEY (`blocklist_domain_id`) REFERENCES `blocklist_domains` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_blocked_ips_ip` FOREIGN KEY (`ip_id`) REFERENCES `ip_addresses` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 
 -- Hostnames table
 CREATE TABLE IF NOT EXISTS `hostnames` (
