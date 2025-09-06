@@ -19,9 +19,27 @@ except ImportError:
 # --- Ensure HTTP dissector works on all ports ---
 bind_layers(TCP, HTTPRequest)
 
-# --- Global connection ---
-conn = mariadb.connect(**DB_CONFIG)
-cursor = conn.cursor()
+# --- Global connection with better error handling ---
+def get_db_connection():
+    """Get database connection with automatic reconnection"""
+    global conn, cursor
+    try:
+        if not conn or not conn.open:
+            conn = mariadb.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+        return conn, cursor
+    except Exception as e:
+        print(f"Database connection error: {e}")
+        try:
+            conn = mariadb.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+            return conn, cursor
+        except Exception as e2:
+            print(f"Failed to reconnect to database: {e2}")
+            raise
+
+# Initialize connection
+conn, cursor = get_db_connection()
 
 # --- DB helpers ---
 def get_or_insert(table, column, value):
@@ -70,6 +88,9 @@ def insert_packet_log(packet_timestamp, src_ip, src_port, dst_ip, dst_port,
     """Insert normalized packet log; reconnect if server has gone away"""
     global conn, cursor
     try:
+        # Ensure we have a valid connection
+        conn, cursor = get_db_connection()
+        
         src_ip_id = get_or_insert_ip(src_ip)
         dst_ip_id = get_or_insert_ip(dst_ip)
         src_mac_id = get_or_insert_mac(src_mac)
@@ -93,13 +114,18 @@ def insert_packet_log(packet_timestamp, src_ip, src_port, dst_ip, dst_port,
     except mariadb.Error as e:
         if "MySQL server has gone away" in str(e):
             print("DB connection lost, reconnecting...")
-            conn = mariadb.connect(**DB_CONFIG)
-            cursor = conn.cursor()
-            insert_packet_log(packet_timestamp, src_ip, src_port, dst_ip, dst_port,
-                              src_mac, dst_mac, method, hostname, path, user_agent,
-                              accept_language, pkt_type)
+            try:
+                conn = mariadb.connect(**DB_CONFIG)
+                cursor = conn.cursor()
+                insert_packet_log(packet_timestamp, src_ip, src_port, dst_ip, dst_port,
+                                  src_mac, dst_mac, method, hostname, path, user_agent,
+                                  accept_language, pkt_type)
+            except Exception as e2:
+                print(f"Failed to insert packet log after reconnect: {e2}")
         else:
-            raise
+            print(f"Database error inserting packet log: {e}")
+    except Exception as e:
+        print(f"Unexpected error inserting packet log: {e}")
 
 # --- Blocklist matching & firewall helper ---
 def _normalize_hostname(host: str) -> str:
@@ -161,14 +187,17 @@ def find_matching_blocklists_for_host(host: str):
             pass
 
 
-def find_matching_blocklist_domains(host: str):
+def find_matching_blocklist_domains(host: str, settings: dict = None):
     """Return list of tuples (blocklist_id, blocklist_domain_id) for exact host matches in active blocklists."""
-    global conn
+    if settings is None:
+        settings = load_system_settings()
+        
     h = _normalize_hostname(host)
     if not h:
         return []
+    
     try:
-        cur = conn.cursor()
+        conn, cur = get_db_connection()
         query = (
             "SELECT bd.blocklist_id, bd.id AS blocklist_domain_id "
             "FROM blocklist_domains bd "
@@ -178,28 +207,11 @@ def find_matching_blocklist_domains(host: str):
         cur.execute(query, (h,))
         rows = cur.fetchall()
         return [(row[0], row[1]) for row in rows]
-    except mariadb.Error as e:
-        if "MySQL server has gone away" in str(e):
-            try:
-                conn = mariadb.connect(**DB_CONFIG)
-                cur = conn.cursor()
-                cur.execute(query, (h,))
-                rows = cur.fetchall()
-                return [(row[0], row[1]) for row in rows]
-            except Exception as e2:
-                print(f"Blocklist domain lookup failed after reconnect: {e2}")
-                return []
-        else:
-            print(f"Blocklist domain lookup error: {e}")
-            return []
     except Exception as e:
-        print(f"Blocklist domain lookup unexpected error: {e}")
+        log_level = settings.get("log_level", "INFO").upper()
+        if log_level in ("DEBUG", "ALL"):
+            print(f"Warning: Blocklist lookup failed for {h}: {e}")
         return []
-    finally:
-        try:
-            cur.close()
-        except Exception:
-            pass
 
 
 def _record_blocked_ip(blocklist_domain_id: int, ip: str):
@@ -233,15 +245,18 @@ def _record_blocked_ip(blocklist_domain_id: int, ip: str):
             print(f"blocked_ips insert error: {e}")
 
 
-def ipset_add_ip(blocklist_id: int, ip: str, blocklist_domain_id: int | None = None):
+def ipset_add_ip(blocklist_id: int, ip: str, blocklist_domain_id: int | None = None, settings: dict = None):
     """Add IP to nft set for blocklist and record it in DB linked to the specific domain when provided."""
-    print(f"DEBUG: ipset_add_ip called with blocklist_id={blocklist_id}, ip={ip}, domain_id={blocklist_domain_id}")
+    if settings is None:
+        settings = load_system_settings()
+        
+    debug_print(f"DEBUG: ipset_add_ip called with blocklist_id={blocklist_id}, ip={ip}, domain_id={blocklist_domain_id}", settings=settings)
     
     # First try to apply firewall change
     try:
         # Scripts now have setuid bit set, so no need for sudo
         cmd = ["/usr/local/sbin/zoplog-firewall-ipset-add", str(blocklist_id), ip]
-        print(f"DEBUG: Executing command: {' '.join(cmd)}")
+        debug_print(f"DEBUG: Executing command: {' '.join(cmd)}", settings=settings)
         
         result = subprocess.run(
             cmd,
@@ -250,15 +265,15 @@ def ipset_add_ip(blocklist_id: int, ip: str, blocklist_domain_id: int | None = N
             timeout=2,
         )
         
-        print(f"DEBUG: Command completed - returncode={result.returncode}")
-        print(f"DEBUG: stdout: {repr(result.stdout)}")
-        print(f"DEBUG: stderr: {repr(result.stderr)}")
+        debug_print(f"DEBUG: Command completed - returncode={result.returncode}", settings=settings)
+        debug_print(f"DEBUG: stdout: {repr(result.stdout)}", settings=settings)
+        debug_print(f"DEBUG: stderr: {repr(result.stderr)}", settings=settings)
         
         if result.returncode != 0:
             err = (result.stderr or '').strip()
             print(f"ERROR: ipset add failed rc={result.returncode} id={blocklist_id} ip={ip} stderr={err}")
         else:
-            print(f"SUCCESS: ipset add completed successfully for id={blocklist_id} ip={ip}")
+            debug_print(f"SUCCESS: ipset add completed successfully for id={blocklist_id} ip={ip}", settings=settings)
             
     except subprocess.TimeoutExpired:
         print(f"ERROR: ipset add timed out id={blocklist_id} ip={ip}")
@@ -268,13 +283,13 @@ def ipset_add_ip(blocklist_id: int, ip: str, blocklist_domain_id: int | None = N
     # Independently record in DB (even if firewall fails, for observability)
     if blocklist_domain_id:
         try:
-            print(f"DEBUG: Recording blocked IP in database for domain_id={blocklist_domain_id}")
+            debug_print(f"DEBUG: Recording blocked IP in database for domain_id={blocklist_domain_id}", settings=settings)
             _record_blocked_ip(blocklist_domain_id, ip)
-            print(f"DEBUG: Successfully recorded blocked IP in database")
+            debug_print(f"DEBUG: Successfully recorded blocked IP in database", settings=settings)
         except Exception as e:
             print(f"ERROR: record blocked_ip error domain_id={blocklist_domain_id} ip={ip} err={e}")
     else:
-        print(f"DEBUG: No blocklist_domain_id provided, skipping database record")
+        debug_print(f"DEBUG: No blocklist_domain_id provided, skipping database record", settings=settings)
 
 # --- Packet logging ---
 def _get_ips(packet):
@@ -288,7 +303,10 @@ def _get_ips(packet):
     return None, None
 
 
-def log_http_request(packet):
+def log_http_request(packet, settings: dict = None):
+    if settings is None:
+        settings = load_system_settings()
+        
     ts = datetime.fromtimestamp(float(packet.time)).strftime('%Y-%m-%d %H:%M:%S')
     http_request = packet[HTTPRequest]
 
@@ -303,7 +321,11 @@ def log_http_request(packet):
     user_agent = http_request.User_Agent.decode() if http_request.User_Agent else None
     accept_language = http_request.Accept_Language.decode() if http_request.Accept_Language else None
 
-    print(f"{ts}\t{src_ip}:{src_port} ({src_mac})\t{dst_ip}:{dst_port} ({dst_mac})\tHTTP\t{method}\t{host}{path or ''}")
+    # Only print if INFO level or higher
+    log_level = settings.get("log_level", "INFO").upper()
+    if log_level in ("DEBUG", "ALL"):
+        print(f"{ts}\t{src_ip}:{src_port} ({src_mac})\t{dst_ip}:{dst_port} ({dst_mac})\tHTTP\t{method}\t{host}{path or ''}")
+    
     insert_packet_log(ts, src_ip, src_port, dst_ip, dst_port,
                       src_mac, dst_mac,
                       method, host, path, user_agent, accept_language, "HTTP")
@@ -311,107 +333,65 @@ def log_http_request(packet):
     # If host matches any active blocklist, add destination IP to corresponding set(s) and record it
     try:
         if host and dst_ip:
-            for bl_id, bd_id in find_matching_blocklist_domains(host):
-                ipset_add_ip(bl_id, dst_ip, bd_id)
+            for bl_id, bd_id in find_matching_blocklist_domains(host, settings):
+                ipset_add_ip(bl_id, dst_ip, bd_id, settings)
     except Exception as e:
         print(f"error during ipset add for HTTP host={host} ip={dst_ip}: {e}")
 
 def extract_tls_sni(packet):
-    """Parse TLS ClientHello to extract SNI hostname cleanly."""
+    """Parse TLS ClientHello to extract SNI hostname efficiently."""
     try:
         if not packet.haslayer(scapy.TCP) or not packet.haslayer(scapy.Raw):
             return None
         data = bytes(packet[scapy.Raw].load)
-        # TLS record header: 5 bytes
-        if len(data) < 5 or data[0] != 0x16:  # ContentType 22 = handshake
+        
+        # Quick length and type checks
+        if len(data) < 43 or data[0] != 0x16:  # Not a handshake record
             return None
-        # Record length (not strictly needed for this quick parse)
-        # rec_len = int.from_bytes(data[3:5], 'big')
-        # Handshake must be ClientHello
-        if len(data) < 6 or data[5] != 0x01:
+        
+        # Check for ClientHello
+        if data[5] != 0x01:
             return None
 
-        idx = 5
-        if len(data) < 9:
-            return None
-        hs_len = int.from_bytes(data[6:9], 'big')  # noqa: F841
-        idx = 9
-
-        # Client version (2) + Random (32)
-        if len(data) < idx + 2 + 32:
-            return None
-        idx += 2 + 32
-
-        # Session ID
-        if len(data) < idx + 1:
-            return None
-        sid_len = data[idx]
-        idx += 1
-        if len(data) < idx + sid_len:
-            return None
-        idx += sid_len
-
-        # Cipher Suites
+        # Skip to extensions (faster than detailed parsing)
+        idx = 43  # Skip fixed ClientHello header
         if len(data) < idx + 2:
             return None
-        cs_len = int.from_bytes(data[idx:idx+2], 'big')
+            
+        ext_len = int.from_bytes(data[idx:idx+2], 'big')
         idx += 2
-        if len(data) < idx + cs_len:
-            return None
-        idx += cs_len
-
-        # Compression Methods
-        if len(data) < idx + 1:
-            return None
-        comp_len = data[idx]
-        idx += 1
-        if len(data) < idx + comp_len:
-            return None
-        idx += comp_len
-
-        # Extensions
-        if len(data) < idx + 2:
-            return None
-        ext_total_len = int.from_bytes(data[idx:idx+2], 'big')
-        idx += 2
-        end = idx + ext_total_len
+        end = idx + ext_len
+        
         if end > len(data):
-            end = len(data)
+            return None
 
+        # Scan for SNI extension
         while idx + 4 <= end:
             ext_type = int.from_bytes(data[idx:idx+2], 'big')
-            ext_len = int.from_bytes(data[idx+2:idx+4], 'big')
-            ext_data_start = idx + 4
-            ext_data_end = ext_data_start + ext_len
-            if ext_data_end > end:
+            if ext_type == 0x0000:  # SNI extension
+                ext_len = int.from_bytes(data[idx+2:idx+4], 'big')
+                ext_data_start = idx + 4
+                if ext_len >= 5:  # Minimum SNI structure
+                    # Skip server name list length (2 bytes) and name type (1 byte)
+                    name_len_start = ext_data_start + 3
+                    if name_len_start + 2 <= ext_data_start + ext_len:
+                        name_len = int.from_bytes(data[name_len_start:name_len_start+2], 'big')
+                        name_start = name_len_start + 2
+                        if name_start + name_len <= ext_data_start + ext_len:
+                            host_bytes = data[name_start:name_start+name_len]
+                            host = host_bytes.decode('utf-8', errors='ignore').strip().lower().rstrip('.')
+                            return host
                 break
-
-            # SNI extension type = 0x0000
-            if ext_type == 0x0000:
-                if ext_len < 2:
-                    break
-                list_len = int.from_bytes(data[ext_data_start:ext_data_start+2], 'big')
-                p = ext_data_start + 2
-                list_end = min(ext_data_end, p + list_len)
-                while p + 3 <= list_end:
-                    name_type = data[p]
-                    name_len = int.from_bytes(data[p+1:p+3], 'big')
-                    p += 3
-                    if p + name_len > list_end:
-                        break
-                    if name_type == 0x00:  # host_name
-                        host_bytes = data[p:p+name_len]
-                        host = host_bytes.decode('utf-8', errors='ignore').strip().lower().rstrip('.')
-                        return host
-                    p += name_len
-
-            idx = ext_data_end
+            idx += 4 + int.from_bytes(data[idx+2:idx+4], 'big')
 
         return None
     except Exception:
         return None
 
-def log_https_request(packet):
+def log_https_request(packet, settings: dict = None):
+    if settings is None:
+        settings = load_system_settings()
+        
     ts = datetime.fromtimestamp(float(packet.time)).strftime('%Y-%m-%d %H:%M:%S')
 
     src_ip, dst_ip = _get_ips(packet)
@@ -421,7 +401,11 @@ def log_https_request(packet):
 
     hostname = extract_tls_sni(packet)
 
-    print(f"{ts}\t{src_ip}:{src_port} ({src_mac})\t{dst_ip}:{dst_port} ({dst_mac})\tHTTPS\t{hostname or 'N/A'}")
+    # Only print if INFO level or higher
+    log_level = settings.get("log_level", "INFO").upper()
+    if log_level in ("DEBUG", "ALL"):
+        print(f"{ts}\t{src_ip}:{src_port} ({src_mac})\t{dst_ip}:{dst_port} ({dst_mac})\tHTTPS\t{hostname or 'N/A'}")
+    
     insert_packet_log(ts, src_ip, src_port, dst_ip, dst_port,
                       src_mac, dst_mac,
                       "TLS_CLIENTHELLO", hostname, None, None, None, "HTTPS")
@@ -429,19 +413,22 @@ def log_https_request(packet):
     # If SNI matches any active blocklist, add destination IP to corresponding set(s) and record it
     try:
         if hostname and dst_ip:
-            for bl_id, bd_id in find_matching_blocklist_domains(hostname):
-                ipset_add_ip(bl_id, dst_ip, bd_id)
+            for bl_id, bd_id in find_matching_blocklist_domains(hostname, settings):
+                ipset_add_ip(bl_id, dst_ip, bd_id, settings)
     except Exception as e:
         print(f"error during ipset add for HTTPS host={hostname} ip={dst_ip}: {e}")
 
 def tcp_packet_handler(packet):
     try:
+        # Load settings once per packet batch for performance
+        settings = load_system_settings()
+        
         if packet.haslayer(HTTPRequest):
-            log_http_request(packet)
+            log_http_request(packet, settings)
         else:
             hostname = extract_tls_sni(packet)
             if hostname:
-                log_https_request(packet)
+                log_https_request(packet, settings)
     except Exception:
         pass
 
@@ -460,6 +447,15 @@ def load_system_settings():
         "monitor_interface": DEFAULT_MONITOR_INTERFACE,
         "last_updated": None
     }
+
+def debug_print(*args, settings: dict = None, **kwargs):
+    """Conditional debug print - only prints if debug logging is enabled"""
+    if settings is None:
+        settings = load_system_settings()
+    
+    log_level = settings.get("log_level", "INFO").upper()
+    if log_level in ("DEBUG", "ALL"):
+        print(*args, **kwargs)
 
 def get_available_interfaces():
     """Get list of available network interfaces"""
