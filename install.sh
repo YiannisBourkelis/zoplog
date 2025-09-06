@@ -660,6 +660,9 @@ setup_scripts() {
     cp "$ZOPLOG_HOME/zoplog/scripts/"* /usr/local/sbin/
     chmod +x /usr/local/sbin/zoplog-*
     
+    # Set setuid bit on firewall scripts for proper privilege escalation
+    chmod u+s /usr/local/sbin/zoplog-firewall-*
+    
     # Create NFTables persistence systemd service
     cat > /etc/systemd/system/zoplog-nftables.service <<EOF
 [Unit]
