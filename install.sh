@@ -38,6 +38,52 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# --- New: optional early interactive interface selection ---
+ask_user_interfaces() {
+    # Skip if non-interactive
+    if ! [ -t 0 ]; then
+        return 0
+    fi
+
+    echo
+    echo "Detected network interfaces (all types):"
+    mapfile -t ALL_IFACES < <(ip -o link show | awk -F': ' '{print $2}' | cut -d'@' -f1 | grep -v '^lo$' | sort -u)
+    if ((${#ALL_IFACES[@]}==0)); then
+        log_warning "No non-loopback interfaces detected at this early stage. Falling back to automatic detection later."
+        return 0
+    fi
+
+    local idx=0
+    for ifc in "${ALL_IFACES[@]}"; do
+        echo "  [$idx] $ifc"
+        ((idx++))
+    done
+
+    if ((${#ALL_IFACES[@]}==1)); then
+        log_warning "Only one interface (${ALL_IFACES[0]}) available; bridge mode will NOT be created."
+        OVERRIDE_INTERNET_IF="${ALL_IFACES[0]}"
+        OVERRIDE_INTERNAL_IF=""  # single interface
+        return 0
+    fi
+
+    read -rp "Select internet-facing (WAN) interface index: " WAN_IDX
+    if ! [[ $WAN_IDX =~ ^[0-9]+$ ]] || (( WAN_IDX < 0 || WAN_IDX >= ${#ALL_IFACES[@]} )); then
+        log_warning "Invalid selection; using automatic detection instead."
+        return 0
+    fi
+    read -rp "Select local-network (LAN) interface index (different from WAN): " LAN_IDX
+    if ! [[ $LAN_IDX =~ ^[0-9]+$ ]] || (( LAN_IDX < 0 || LAN_IDX >= ${#ALL_IFACES[@]} )) || [[ $LAN_IDX == $WAN_IDX ]]; then
+        log_warning "Invalid or same selection; will treat as single-interface (no bridge)."
+        OVERRIDE_INTERNET_IF="${ALL_IFACES[$WAN_IDX]}"
+        OVERRIDE_INTERNAL_IF=""
+        return 0
+    fi
+
+    OVERRIDE_INTERNET_IF="${ALL_IFACES[$WAN_IDX]}"
+    OVERRIDE_INTERNAL_IF="${ALL_IFACES[$LAN_IDX]}"
+    log_info "User selected WAN=${OVERRIDE_INTERNET_IF} LAN=${OVERRIDE_INTERNAL_IF}"
+}
+
 check_root() {
     if [[ $EUID -ne 0 ]]; then
         log_error "This script must be run as root. Use: curl -sSL https://raw.githubusercontent.com/YiannisBourkelis/zoplog/main/install.sh | sudo bash"
@@ -57,6 +103,25 @@ check_debian() {
 
 detect_interfaces() {
     log_info "Detecting network interfaces..."
+
+    # If user pre-selected via ask_user_interfaces() keep those
+    if [ -n "${OVERRIDE_INTERNET_IF:-}" ]; then
+        INTERNET_IF="$OVERRIDE_INTERNET_IF"
+        if [ -n "${OVERRIDE_INTERNAL_IF:-}" ]; then
+            INTERNAL_IF="$OVERRIDE_INTERNAL_IF"
+            BRIDGE_MODE="dual"
+            log_info "Using user-selected interfaces (dual): INTERNET_IF=$INTERNET_IF INTERNAL_IF=$INTERNAL_IF"
+        else
+            INTERNAL_IF=""
+            BRIDGE_MODE="single"
+            log_info "Using user-selected interface (single): INTERNET_IF=$INTERNET_IF"
+        fi
+        # Confirmation pause only in interactive terminal
+        if [ -t 0 ]; then
+            read -p "Press Enter to continue or Ctrl+C to abort" _
+        fi
+        return 0
+    fi
     
     # Get all ethernet interfaces (excluding loopback) - include USB adapters universally
     INTERFACES=($(ip link show | grep -E "^[0-9]+: (eth|enp|ens|usb)" | cut -d: -f2 | sed 's/ //g'))
@@ -1007,6 +1072,8 @@ main() {
     
     check_root
     check_debian
+    # New interactive selection before automatic detection
+    ask_user_interfaces
     detect_interfaces
     
     log_info "Starting ZopLog installation..."
