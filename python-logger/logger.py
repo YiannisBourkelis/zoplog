@@ -445,11 +445,12 @@ def tcp_packet_handler(packet):
         pass
 
 def load_system_settings():
-    """Load system settings from file, return defaults if not found"""
+    """Load system settings from centralized config file, return defaults if not found"""
     try:
         if os.path.exists(SETTINGS_FILE):
-            with open(SETTINGS_FILE, 'r') as f:
-                return json.load(f)
+            # Load from INI format (/etc/zoplog/zoplog.conf)
+            from zoplog_config import load_settings_config
+            return load_settings_config()
     except Exception as e:
         print(f"Warning: Could not load settings file: {e}")
     
