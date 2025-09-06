@@ -239,14 +239,20 @@ def ipset_add_ip(blocklist_id: int, ip: str, blocklist_domain_id: int | None = N
     
     # First try to apply firewall change
     try:
-        cmd = ["sudo", "/usr/local/sbin/zoplog-firewall-ipset-add", str(blocklist_id), ip]
+        # Use full path to sudo and ensure proper environment
+        cmd = ["/usr/bin/sudo", "/usr/local/sbin/zoplog-firewall-ipset-add", str(blocklist_id), ip]
         print(f"DEBUG: Executing command: {' '.join(cmd)}")
+        
+        # Set up environment for sudo
+        env = os.environ.copy()
+        env['PATH'] = '/usr/local/sbin:/usr/sbin:/sbin:/usr/bin:/bin'
         
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             timeout=2,
+            env=env
         )
         
         print(f"DEBUG: Command completed - returncode={result.returncode}")
