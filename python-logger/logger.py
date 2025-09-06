@@ -239,7 +239,7 @@ def ipset_add_ip(blocklist_id: int, ip: str, blocklist_domain_id: int | None = N
     
     # First try to apply firewall change
     try:
-        # Use setuid script directly (no sudo needed)
+        # Scripts now have setuid bit set, so no need for sudo
         cmd = ["/usr/local/sbin/zoplog-firewall-ipset-add", str(blocklist_id), ip]
         print(f"DEBUG: Executing command: {' '.join(cmd)}")
         
