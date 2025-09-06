@@ -750,6 +750,37 @@ EOF
         # Enable systemd-networkd
         systemctl enable systemd-networkd
         
+        # Configure br_netfilter module for bridge firewall support
+        log_info "Configuring br_netfilter module for bridge firewall support..."
+        
+        # Add br_netfilter to /etc/modules for automatic loading on boot
+        if ! grep -q "^br_netfilter$" /etc/modules; then
+            echo "br_netfilter" >> /etc/modules
+            log_info "Added br_netfilter to /etc/modules"
+        else
+            log_info "br_netfilter already in /etc/modules"
+        fi
+        
+        # Add bridge netfilter sysctl settings to /etc/sysctl.conf
+        if ! grep -q "^net.bridge.bridge-nf-call-iptables=" /etc/sysctl.conf; then
+            echo "net.bridge.bridge-nf-call-iptables=1" >> /etc/sysctl.conf
+            echo "net.bridge.bridge-nf-call-ip6tables=1" >> /etc/sysctl.conf
+            log_info "Added bridge netfilter sysctl settings to /etc/sysctl.conf"
+        else
+            log_info "Bridge netfilter sysctl settings already configured"
+        fi
+        
+        # Load br_netfilter module immediately
+        if ! lsmod | grep -q br_netfilter; then
+            modprobe br_netfilter
+            log_info "Loaded br_netfilter kernel module"
+        else
+            log_info "br_netfilter kernel module already loaded"
+        fi
+        
+        # Apply sysctl settings
+        sysctl -p
+        
         log_success "Bridge configuration completed for dual-interface mode"
     else
         log_info "Single interface mode - no bridge configuration needed"
