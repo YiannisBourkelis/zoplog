@@ -484,11 +484,9 @@ setup_sudoers() {
     # Remove any existing zoplog sudoers files to avoid conflicts
     rm -f /etc/sudoers.d/zoplog /etc/sudoers.d/zoplog-web
     
-    # Create consolidated sudoers entry for ZopLog with audit plugin bypass
+    # Create consolidated sudoers entry for ZopLog
     cat > /etc/sudoers.d/zoplog <<EOF
-# ZopLog sudoers configuration with audit plugin bypass
-Defaults:zoplog !audit
-Defaults:www-data !audit
+# ZopLog sudoers configuration
 
 # ZopLog firewall management for logger service
 zoplog ALL=(root) NOPASSWD: /usr/local/sbin/zoplog-firewall-ipset-add
@@ -527,7 +525,7 @@ EOF
         return 1
     fi
     
-    log_success "Sudoers permissions configured with audit plugin bypass"
+    log_success "Sudoers permissions configured successfully"
 }
 
 setup_nginx() {
