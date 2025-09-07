@@ -6,4 +6,4 @@ nft list chain inet "$TABLE" input  >/dev/null 2>&1 || nft add chain inet "$TABL
 nft list chain inet "$TABLE" output >/dev/null 2>&1 || nft add chain inet "$TABLE" output '{ type filter hook output priority 0; policy accept; }'
 
 # No-op otherwise; autosave current ruleset if helper present
-/usr/local/sbin/zoplog-nft-autosave post-apply >/dev/null 2>&1 || true
+"$(dirname "$0")/zoplog-nft-autosave" post-apply >/dev/null 2>&1 || true

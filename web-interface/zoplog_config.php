@@ -115,4 +115,22 @@ $DB_USER = $db_config['user'];
 $DB_PASS = $db_config['password'];
 $DB_NAME = $db_config['database'];
 $DB_PORT = $db_config['port'];
+
+/**
+ * Get the path to ZopLog scripts directory
+ */
+function get_zoplog_scripts_path() {
+    // Default path for installed system
+    $default_path = '/opt/zoplog/zoplog/scripts';
+    
+    // Check if we're in development mode (scripts directory exists relative to web root)
+    $dev_path = __DIR__ . '/../scripts';
+    if (file_exists($dev_path) && is_dir($dev_path)) {
+        return realpath($dev_path);
+    }
+    
+    // Return installed path
+    return $default_path;
+}
+
 ?>

@@ -5,7 +5,7 @@ from scapy.layers.http import HTTPRequest
 from scapy.packet import bind_layers
 from scapy.layers.inet import TCP
 from datetime import datetime
-from config import DB_CONFIG, DEFAULT_MONITOR_INTERFACE, SETTINGS_FILE
+from config import DB_CONFIG, DEFAULT_MONITOR_INTERFACE, SETTINGS_FILE, SCRIPTS_DIR
 import subprocess
 import json
 import os
@@ -255,8 +255,9 @@ def ipset_add_ip(blocklist_id: int, ip: str, blocklist_domain_id: int | None = N
     
     # First try to apply firewall change
     try:
-        # Scripts now have setuid bit set, so no need for sudo
-        cmd = ["/usr/local/sbin/zoplog-firewall-ipset-add", str(blocklist_id), ip]
+        # Use scripts from relative path instead of /usr/local/sbin/
+        script_path = os.path.join(SCRIPTS_DIR, "zoplog-firewall-ipset-add")
+        cmd = [script_path, str(blocklist_id), ip]
         debug_print(f"DEBUG: Executing command: {' '.join(cmd)}", settings=settings)
         
         result = subprocess.run(

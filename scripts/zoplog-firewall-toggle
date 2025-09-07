@@ -96,4 +96,4 @@ else
 fi
 
 # Auto-save rules after toggling
-/usr/local/sbin/zoplog-nft-autosave post-toggle >/dev/null 2>&1 || true
+"$(dirname "$0")/zoplog-nft-autosave" post-toggle >/dev/null 2>&1 || true

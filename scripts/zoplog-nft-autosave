@@ -9,7 +9,7 @@ TABLE="zoplog"
 
 # Function to save rules
 save_rules() {
-    /usr/local/sbin/zoplog-nft-save
+    "$(dirname "$0")/zoplog-nft-save"
 }
 
 # Save rules after any ZopLog firewall operation

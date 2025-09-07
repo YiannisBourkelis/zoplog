@@ -32,7 +32,9 @@ try {
 
     // Attempt to remove firewall rules via helper, but do not fail deletion if they don't exist
     $warning = null;
-    $cmd = 'sudo -n /usr/local/sbin/zoplog-firewall-remove ' . escapeshellarg((string)$id);
+    require_once 'zoplog_config.php';
+    $scripts_path = get_zoplog_scripts_path();
+    $cmd = 'sudo -n ' . escapeshellarg($scripts_path . '/zoplog-firewall-remove') . ' ' . escapeshellarg((string)$id);
     $descriptors = [1 => ['pipe','w'], 2 => ['pipe','w']];
     $proc = @proc_open($cmd, $descriptors, $pipes);
     if (is_resource($proc)) {

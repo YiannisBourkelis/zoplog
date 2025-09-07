@@ -78,4 +78,4 @@ add_rule_if_missing forward "zoplog-bl-${id}-forward-v6-daddr-log"  oifname "$FI
 add_rule_if_missing forward "zoplog-bl-${id}-forward-v6-daddr-drop" oifname "$FIREWALL_INTERFACE" ip6 daddr @"$SET_V6" drop
 
 # Auto-save rules after applying
-/usr/local/sbin/zoplog-nft-autosave post-apply >/dev/null 2>&1 || true
+"$(dirname "$0")/zoplog-nft-autosave" post-apply >/dev/null 2>&1 || true

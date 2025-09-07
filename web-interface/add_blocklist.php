@@ -35,10 +35,12 @@ function run_cmd($cmd) {
 
 /**
  * Apply firewall rules for this blocklist via a root-owned helper.
- * Expects: sudoers allows www-data to run /usr/local/sbin/zoplog-firewall-apply without password.
+ * Expects: sudoers allows www-data to run scripts in ZopLog scripts directory without password.
  */
 function ensure_firewall_rules(int $blocklistId) {
-    $cmd = 'sudo -n /usr/local/sbin/zoplog-firewall-apply ' . escapeshellarg((string)$blocklistId);
+    require_once 'zoplog_config.php';
+    $scripts_path = get_zoplog_scripts_path();
+    $cmd = 'sudo -n ' . escapeshellarg($scripts_path . '/zoplog-firewall-apply') . ' ' . escapeshellarg((string)$blocklistId);
     [$code, $out, $err] = run_cmd($cmd);
     if ($code !== 0) {
         $detail = trim($err ?: $out);

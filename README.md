@@ -137,9 +137,9 @@ sudo journalctl -u zoplog-logger -f
 sudo journalctl -u zoplog-blockreader -f
 
 # Firewall management
-sudo /usr/local/sbin/zoplog-firewall-apply <blocklist_id>
-sudo /usr/local/sbin/zoplog-firewall-toggle <blocklist_id> active
-sudo /usr/local/sbin/zoplog-firewall-remove <blocklist_id>
+sudo /opt/zoplog/zoplog/scripts/zoplog-firewall-apply <blocklist_id>
+sudo /opt/zoplog/zoplog/scripts/zoplog-firewall-toggle <blocklist_id> active
+sudo /opt/zoplog/zoplog/scripts/zoplog-firewall-remove <blocklist_id>
 ```
 
 ### Adding Blocklists

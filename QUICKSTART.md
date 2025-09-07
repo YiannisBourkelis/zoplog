@@ -130,9 +130,9 @@ curl http://YOUR_IP/api/realtime_data.php | jq '.'
 ### Firewall Integration
 ```bash
 # Manual firewall control
-sudo /usr/local/sbin/zoplog-firewall-apply 1    # Apply blocklist ID 1
-sudo /usr/local/sbin/zoplog-firewall-toggle 1 inactive  # Disable
-sudo /usr/local/sbin/zoplog-firewall-remove 1   # Remove completely
+sudo /opt/zoplog/zoplog/scripts/zoplog-firewall-apply 1    # Apply blocklist ID 1
+sudo /opt/zoplog/zoplog/scripts/zoplog-firewall-toggle 1 inactive  # Disable
+sudo /opt/zoplog/zoplog/scripts/zoplog-firewall-remove 1   # Remove completely
 ```
 
 ---

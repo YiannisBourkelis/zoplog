@@ -29,7 +29,7 @@ echo "Restoring active blocklists..."
 # Apply firewall rules for each active blocklist
 for list_id in $ACTIVE_LISTS; do
     echo "Applying blocklist $list_id..."
-    /usr/local/sbin/zoplog-firewall-apply "$list_id" || echo "Failed to apply blocklist $list_id"
+    "$(dirname "$0")/zoplog-firewall-apply" "$list_id" || echo "Failed to apply blocklist $list_id"
 done
 
 echo "Blocklist restoration completed"

@@ -18,7 +18,9 @@ if ($id <= 0 || !in_array($state, ['active','inactive'], true)) {
 }
 
 // First attempt to apply firewall change via helper (idempotent)
-$cmd = 'sudo -n /usr/local/sbin/zoplog-firewall-toggle ' . escapeshellarg((string)$id) . ' ' . escapeshellarg($state);
+require_once 'zoplog_config.php';
+$scripts_path = get_zoplog_scripts_path();
+$cmd = 'sudo -n ' . escapeshellarg($scripts_path . '/zoplog-firewall-toggle') . ' ' . escapeshellarg((string)$id) . ' ' . escapeshellarg($state);
 $descriptors = [1 => ['pipe','w'], 2 => ['pipe','w']];
 $proc = proc_open($cmd, $descriptors, $pipes);
 if (!is_resource($proc)) {

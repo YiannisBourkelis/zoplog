@@ -37,4 +37,4 @@ nft list set inet "$TABLE" "$SET_V4" >/dev/null 2>&1 && nft delete set inet "$TA
 nft list set inet "$TABLE" "$SET_V6" >/dev/null 2>&1 && nft delete set inet "$TABLE" "$SET_V6" || true
 
 # Auto-save rules after removing
-/usr/local/sbin/zoplog-nft-autosave post-remove >/dev/null 2>&1 || true
+"$(dirname "$0")/zoplog-nft-autosave" post-remove >/dev/null 2>&1 || true

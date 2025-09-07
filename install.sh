@@ -554,11 +554,11 @@ setup_sudoers() {
 # ZopLog sudoers configuration
 
 # ZopLog firewall management for logger service
-zoplog ALL=(root) NOPASSWD: /usr/local/sbin/zoplog-firewall-ipset-add
+zoplog ALL=(root) NOPASSWD: $ZOPLOG_HOME/zoplog/scripts/zoplog-firewall-ipset-add
 
 # ZopLog firewall management for web interface
-www-data ALL=(root) NOPASSWD: /usr/local/sbin/zoplog-firewall-*
-www-data ALL=(root) NOPASSWD: /usr/local/sbin/zoplog-nft-*
+www-data ALL=(root) NOPASSWD: $ZOPLOG_HOME/zoplog/scripts/zoplog-firewall-*
+www-data ALL=(root) NOPASSWD: $ZOPLOG_HOME/zoplog/scripts/zoplog-nft-*
 
 # Allow www-data to manage ZopLog services without password
 www-data ALL=(ALL) NOPASSWD: /bin/systemctl restart zoplog-logger
@@ -652,18 +652,22 @@ EOF
 }
 
 setup_scripts() {
-    log_info "Installing ZopLog scripts..."
+    log_info "Setting up ZopLog scripts..."
     
-    mkdir -p /usr/local/sbin
+    # Ensure scripts directory exists and has proper permissions
+    SCRIPTS_DIR="$ZOPLOG_HOME/zoplog/scripts"
+    if [ ! -d "$SCRIPTS_DIR" ]; then
+        log_error "Scripts directory not found: $SCRIPTS_DIR"
+        return 1
+    fi
     
-    # Copy scripts
-    cp "$ZOPLOG_HOME/zoplog/scripts/"* /usr/local/sbin/
-    chmod +x /usr/local/sbin/zoplog-*
+    # Make scripts executable
+    chmod +x "$SCRIPTS_DIR/zoplog-"*
     
     # Set setuid bit on firewall scripts for proper privilege escalation
-    chmod u+s /usr/local/sbin/zoplog-firewall-*
+    chmod u+s "$SCRIPTS_DIR/zoplog-firewall-"*
     
-    # Create NFTables persistence systemd service
+    log_success "Scripts configured successfully"
     cat > /etc/systemd/system/zoplog-nftables.service <<EOF
 [Unit]
 Description=ZopLog NFTables Rules Persistence
@@ -672,7 +676,7 @@ Wants=nftables.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/zoplog-nft-restore
+ExecStart=$ZOPLOG_HOME/zoplog/scripts/zoplog-nft-restore
 RemainAfterExit=yes
 
 [Install]
@@ -690,7 +694,7 @@ Requires=zoplog-nftables.service
 [Service]
 Type=oneshot
 User=root
-ExecStart=/usr/local/sbin/zoplog-restore-blocklists
+ExecStart=$ZOPLOG_HOME/zoplog/scripts/zoplog-restore-blocklists
 RemainAfterExit=yes
 
 [Install]
