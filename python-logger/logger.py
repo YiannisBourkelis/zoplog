@@ -9,6 +9,7 @@ from config import DB_CONFIG, DEFAULT_MONITOR_INTERFACE, SETTINGS_FILE
 import subprocess
 import json
 import os
+import struct
 
 # --- DB driver fallback (mysql-connector or PyMySQL) ---
 try:
@@ -339,127 +340,146 @@ def log_http_request(packet, settings: dict = None):
         print(f"error during ipset add for HTTP host={host} ip={dst_ip}: {e}")
 
 def extract_tls_sni(packet):
-    """Parse TLS ClientHello to extract SNI hostname with proper TLS structure parsing."""
+    """
+    Parse a TLS ClientHello packet to extract the Server Name Indication (SNI)
+    hostname with correct TLS structure parsing.
+
+    This function properly handles the TLS ClientHello structure and SNI extension format.
+    
+        SNI Extension:
+        ├── Extension Type (2 bytes): 0x0000
+        ├── Extension Length (2 bytes)
+        └── SNI Data:
+            ├── Server Name List Length (2 bytes) ← This was missing!
+            ├── Server Name Type (1 byte): 0x00
+            ├── Server Name Length (2 bytes)
+            └── Server Name (variable)
+    """
     try:
+        # --- 1. Initial Validation ---
         if not packet.haslayer(scapy.TCP) or not packet.haslayer(scapy.Raw):
             return None
-        data = bytes(packet[scapy.Raw].load)
 
-        # TLS record header: 5 bytes
-        if len(data) < 5 or data[0] != 0x16:  # ContentType 22 = handshake
+        payload = bytes(packet[scapy.Raw].load)
+
+        # Constants for TLS parsing
+        TLS_HANDSHAKE = 0x16
+        CLIENT_HELLO = 0x01
+        SNI_EXTENSION = 0x0000
+
+        # Minimum ClientHello size check
+        if len(payload) < 80:  # Realistic minimum for ClientHello with SNI
             return None
 
-        # Handshake must be ClientHello (type 1)
-        if len(data) < 6 or data[5] != 0x01:
+        # Check for TLS Handshake (ContentType 22) and ClientHello (type 1)
+        if payload[0] != TLS_HANDSHAKE or payload[5] != CLIENT_HELLO:
             return None
 
-        idx = 5  # Start after record header
-
-        # Skip handshake message header (4 bytes: type, length)
-        if len(data) < idx + 4:
-            return None
-        hs_len = int.from_bytes(data[idx+1:idx+4], 'big')
-        idx += 4
+        # --- 2. Parse TLS Record and Handshake Headers ---
+        # TLS Record Header: ContentType (1) + Version (2) + Length (2) = 5 bytes
+        # Handshake Header: Type (1) + Length (3) = 4 bytes
+        # Total fixed header: 9 bytes
 
         # ClientHello structure:
         # - Version (2 bytes)
         # - Random (32 bytes)
-        # - Session ID length (1 byte)
+        # - Session ID Length (1 byte)
         # - Session ID (variable)
-        # - Cipher Suites length (2 bytes)
+        # - Cipher Suites Length (2 bytes)
         # - Cipher Suites (variable)
-        # - Compression Methods length (1 byte)
+        # - Compression Methods Length (1 byte)
         # - Compression Methods (variable)
-        # - Extensions length (2 bytes)
+        # - Extensions Length (2 bytes)
         # - Extensions (variable)
 
-        # Skip version (2) + random (32)
-        if len(data) < idx + 2 + 32:
-            return None
-        idx += 2 + 32
+        idx = 9  # Start after fixed headers
 
-        # Session ID
-        if len(data) < idx + 1:
-            return None
-        sid_len = data[idx]
-        idx += 1
-        if len(data) < idx + sid_len:
-            return None
-        idx += sid_len
+        # Skip Version (2) + Random (32) = 34 bytes total from start
+        idx += 34
 
-        # Cipher Suites
-        if len(data) < idx + 2:
+        # Skip Session ID (1-byte length + variable data)
+        if idx >= len(payload):
             return None
-        cs_len = int.from_bytes(data[idx:idx+2], 'big')
+        session_id_len = payload[idx]
+        idx += 1 + session_id_len
+
+        # Skip Cipher Suites (2-byte length + variable data)
+        if idx + 2 > len(payload):
+            return None
+        cipher_suites_len = int.from_bytes(payload[idx:idx+2], 'big')
+        idx += 2 + cipher_suites_len
+
+        # Skip Compression Methods (1-byte length + variable data)
+        if idx >= len(payload):
+            return None
+        compression_len = payload[idx]
+        idx += 1 + compression_len
+
+        # --- 3. Parse Extensions ---
+        if idx + 2 > len(payload):
+            return None
+
+        extensions_len = int.from_bytes(payload[idx:idx+2], 'big')
         idx += 2
-        if len(data) < idx + cs_len:
-            return None
-        idx += cs_len
+        extensions_end = idx + extensions_len
 
-        # Compression Methods
-        if len(data) < idx + 1:
-            return None
-        comp_len = data[idx]
-        idx += 1
-        if len(data) < idx + comp_len:
-            return None
-        idx += comp_len
-
-        # Extensions
-        if len(data) < idx + 2:
-            return None
-        ext_total_len = int.from_bytes(data[idx:idx+2], 'big')
-        idx += 2
-        end = idx + ext_total_len
-
-        if end > len(data):
+        if extensions_end > len(payload):
             return None
 
-        # Scan extensions for SNI (type 0x0000)
-        while idx + 4 <= end:
-            ext_type = int.from_bytes(data[idx:idx+2], 'big')
-            ext_len = int.from_bytes(data[idx+2:idx+4], 'big')
+        # --- 4. Find and Parse SNI Extension ---
+        while idx + 4 <= extensions_end:
+            ext_type = int.from_bytes(payload[idx:idx+2], 'big')
+            ext_len = int.from_bytes(payload[idx+2:idx+4], 'big')
             ext_data_start = idx + 4
             ext_data_end = ext_data_start + ext_len
 
-            if ext_data_end > end:
+            if ext_data_end > extensions_end:
                 break
 
-            if ext_type == 0x0000:  # SNI extension
-                # SNI extension structure:
+            if ext_type == SNI_EXTENSION:
+                # Parse SNI extension data
+                sni_idx = ext_data_start
+
+                # SNI Extension Structure:
                 # - Server Name List Length (2 bytes)
-                # - Server Name Type (1 byte) - should be 0 for hostname
+                # - Server Name Type (1 byte) - should be 0x00 for hostname
                 # - Server Name Length (2 bytes)
                 # - Server Name (variable)
 
                 if ext_len < 5:  # Minimum SNI structure
                     break
 
-                # Skip server name list length (2 bytes)
-                sni_idx = ext_data_start + 2
+                # Skip Server Name List Length (2 bytes) - usually just the length of the first name entry
+                sni_idx += 2
 
                 if sni_idx + 3 > ext_data_end:
                     break
 
-                name_type = data[sni_idx]
-                if name_type == 0x00:  # host_name
-                    name_len = int.from_bytes(data[sni_idx+1:sni_idx+3], 'big')
+                name_type = payload[sni_idx]
+                if name_type == 0x00:  # Type 0 = hostname
+                    name_len = int.from_bytes(payload[sni_idx+1:sni_idx+3], 'big')
                     name_start = sni_idx + 3
 
                     if name_start + name_len <= ext_data_end:
-                        host_bytes = data[name_start:name_start+name_len]
+                        hostname_bytes = payload[name_start:name_start+name_len]
                         try:
-                            host = host_bytes.decode('utf-8', errors='ignore').strip().lower().rstrip('.')
-                            if host:  # Only return non-empty hostnames
-                                return host
-                        except:
+                            hostname = hostname_bytes.decode('utf-8', errors='ignore').strip()
+                            if hostname:
+                                return hostname.lower().rstrip('.')
+                        except UnicodeDecodeError:
                             pass
-                break
+                break  # Found SNI extension, no need to continue
 
+            # Move to next extension
             idx = ext_data_end
 
         return None
+
+    except (IndexError, ValueError):
+        # Handle malformed packets gracefully
+        return None
     except Exception:
+        # Catch any other unexpected errors
         return None
 
 def log_https_request(packet, settings: dict = None):
