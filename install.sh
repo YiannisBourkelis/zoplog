@@ -511,6 +511,17 @@ setup_python_environment() {
     # Create virtual environment
     sudo -u "$ZOPLOG_USER" python3 -m venv venv
     
+    # Create config.py from config.example.py for the logger to work
+    log_info "Creating config.py from template..."
+    if [ -f "config.example.py" ]; then
+        cp config.example.py config.py
+        chown "$ZOPLOG_USER:$ZOPLOG_USER" config.py
+        chmod 644 config.py
+        log_success "Created config.py from template"
+    else
+        log_error "config.example.py not found - logger will not work properly"
+    fi
+    
     # Upgrade pip first
     sudo -u "$ZOPLOG_USER" ./venv/bin/pip install --upgrade pip
     
