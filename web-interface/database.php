@@ -171,6 +171,105 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $message = "Error checking database integrity: " . $e->getMessage();
                 $messageType = 'error';
             }
+        } elseif ($_POST['action'] === 'backup_database') {
+            try {
+                // Get database name
+                $db_result = $mysqli->query("SELECT DATABASE() as db_name");
+                $db_row = $db_result->fetch_assoc();
+                $db_name = $db_row['db_name'];
+                $db_result->free();
+
+                // Create backup directory - use system temp if web directory is not writable
+                $backup_dir = __DIR__ . '/backups';
+                if (!is_dir($backup_dir) || !is_writable($backup_dir)) {
+                    $backup_dir = sys_get_temp_dir() . '/zoplog_backups';
+                    if (!is_dir($backup_dir)) {
+                        mkdir($backup_dir, 0755, true);
+                    }
+                }
+
+                // Generate filename with timestamp
+                $timestamp = date('Y-m-d_H-i-s');
+                $sql_filename = "backup_{$db_name}_{$timestamp}.sql";
+                $zip_filename = "backup_{$db_name}_{$timestamp}.zip";
+                $sql_filepath = $backup_dir . '/' . $sql_filename;
+                $zip_filepath = $backup_dir . '/' . $zip_filename;
+
+                // Get all tables
+                $tables_result = $mysqli->query("SHOW TABLES");
+                $tables = [];
+                while ($row = $tables_result->fetch_array()) {
+                    $tables[] = $row[0];
+                }
+                $tables_result->free();
+
+                // Create SQL dump
+                $sql_content = "-- ZopLog Database Backup\n";
+                $sql_content .= "-- Generated on: " . date('Y-m-d H:i:s') . "\n";
+                $sql_content .= "-- Database: {$db_name}\n\n";
+
+                $sql_content .= "SET FOREIGN_KEY_CHECKS = 0;\n\n";
+
+                foreach ($tables as $table) {
+                    // Get table structure
+                    $create_result = $mysqli->query("SHOW CREATE TABLE `$table`");
+                    $create_row = $create_result->fetch_assoc();
+                    $sql_content .= "-- Table structure for `$table`\n";
+                    $sql_content .= $create_row['Create Table'] . ";\n\n";
+                    $create_result->free();
+
+                    // Get table data
+                    $data_result = $mysqli->query("SELECT * FROM `$table`");
+                    if ($data_result->num_rows > 0) {
+                        $sql_content .= "-- Data for `$table`\n";
+                        while ($row = $data_result->fetch_assoc()) {
+                            $values = array_map(function($value) use ($mysqli) {
+                                return $value === null ? 'NULL' : "'" . $mysqli->real_escape_string($value) . "'";
+                            }, $row);
+                            $sql_content .= "INSERT INTO `$table` VALUES (" . implode(', ', $values) . ");\n";
+                        }
+                        $sql_content .= "\n";
+                    }
+                    $data_result->free();
+                }
+
+                $sql_content .= "SET FOREIGN_KEY_CHECKS = 1;\n";
+
+                // Write SQL file
+                file_put_contents($sql_filepath, $sql_content);
+
+                // Create ZIP file
+                $zip = new ZipArchive();
+                if ($zip->open($zip_filepath, ZipArchive::CREATE) === TRUE) {
+                    $zip->addFile($sql_filepath, $sql_filename);
+                    $zip->close();
+
+                    // Clean up SQL file
+                    unlink($sql_filepath);
+
+                    // If backup was created in temp directory, copy to web directory
+                    $web_backup_dir = __DIR__ . '/backups';
+                    if ($backup_dir !== $web_backup_dir) {
+                        if (!is_dir($web_backup_dir)) {
+                            mkdir($web_backup_dir, 0755, true);
+                        }
+                        $web_zip_filepath = $web_backup_dir . '/' . $zip_filename;
+                        copy($zip_filepath, $web_zip_filepath);
+                        unlink($zip_filepath);
+                        $zip_filepath = $web_zip_filepath;
+                    }
+
+                    $message = "Database backup created successfully! <a href='backups/{$zip_filename}' class='text-blue-600 underline' download>Click here to download</a>";
+                    $messageType = 'success';
+
+                } else {
+                    throw new Exception("Failed to create ZIP file");
+                }
+
+            } catch (Exception $e) {
+                $message = "Error creating database backup: " . $e->getMessage();
+                $messageType = 'error';
+            }
         }
     }
 }
@@ -383,7 +482,7 @@ $dbInfo = getDatabaseInfo();
                 </svg>
                 Database Maintenance
             </h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <form method="POST" class="space-y-4">
                     <input type="hidden" name="action" value="optimize_tables">
                     <button type="submit"
@@ -405,10 +504,22 @@ $dbInfo = getDatabaseInfo();
                         Check Integrity
                     </button>
                 </form>
+
+                <form method="POST" class="space-y-4">
+                    <input type="hidden" name="action" value="backup_database">
+                    <button type="submit"
+                            class="w-full bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition duration-200 flex items-center justify-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                        </svg>
+                        Backup Database
+                    </button>
+                </form>
             </div>
             <div class="mt-4 text-sm text-gray-600">
                 <p><strong>Optimize Tables:</strong> Reorganizes table data and indexes for better performance.</p>
                 <p><strong>Check Integrity:</strong> Verifies that table data is not corrupted.</p>
+                <p><strong>Backup Database:</strong> Creates a complete SQL backup and downloads it as a ZIP file.</p>
             </div>
         </div>
 
