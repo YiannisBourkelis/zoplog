@@ -270,6 +270,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $message = "Error creating database backup: " . $e->getMessage();
                 $messageType = 'error';
             }
+        } elseif ($_POST['action'] === 'delete_backup') {
+            try {
+                if (!isset($_POST['filename'])) {
+                    throw new Exception("No filename specified");
+                }
+
+                $filename = basename($_POST['filename']); // Prevent directory traversal
+                $filepath = __DIR__ . '/backups/' . $filename;
+
+                // Validate file exists and is in backups directory
+                if (!file_exists($filepath)) {
+                    throw new Exception("Backup file not found");
+                }
+
+                // Additional security: ensure file is actually a .zip file
+                if (pathinfo($filepath, PATHINFO_EXTENSION) !== 'zip') {
+                    throw new Exception("Invalid file type");
+                }
+
+                // Delete the file
+                if (unlink($filepath)) {
+                    $message = "Backup file '" . htmlspecialchars($filename) . "' has been deleted successfully.";
+                    $messageType = 'success';
+                } else {
+                    throw new Exception("Failed to delete backup file");
+                }
+
+            } catch (Exception $e) {
+                $message = "Error deleting backup file: " . $e->getMessage();
+                $messageType = 'error';
+            }
         }
     }
 }
@@ -301,7 +332,18 @@ $dbInfo = getDatabaseInfo();
                                                     ($messageType === 'error' ? 'bg-red-100 text-red-800 border border-red-200' :
                                                     ($messageType === 'warning' ? 'bg-yellow-100 text-yellow-800 border border-yellow-200' :
                                                     'bg-blue-100 text-blue-800 border border-blue-200')) ?>">
-                <pre class="whitespace-pre-wrap font-mono text-sm"><?php echo htmlspecialchars($message); ?></pre>
+                <div class="font-mono text-sm">
+                    <?php
+                    // Check if message contains HTML tags
+                    if (strpos($message, '<') !== false && strpos($message, '>') !== false) {
+                        // Message contains HTML, output as-is
+                        echo $message;
+                    } else {
+                        // Message is plain text, escape it
+                        echo htmlspecialchars($message);
+                    }
+                    ?>
+                </div>
             </div>
         <?php endif; ?>
 
@@ -521,6 +563,90 @@ $dbInfo = getDatabaseInfo();
                 <p><strong>Check Integrity:</strong> Verifies that table data is not corrupted.</p>
                 <p><strong>Backup Database:</strong> Creates a complete SQL backup and downloads it as a ZIP file.</p>
             </div>
+
+            <!-- Existing Backup Files -->
+            <?php
+            $backup_dir = __DIR__ . '/backups';
+            $backup_files = [];
+
+            if (is_dir($backup_dir)) {
+                $files = scandir($backup_dir);
+                foreach ($files as $file) {
+                    if ($file !== '.' && $file !== '..' && pathinfo($file, PATHINFO_EXTENSION) === 'zip') {
+                        $file_path = $backup_dir . '/' . $file;
+                        $backup_files[] = [
+                            'name' => $file,
+                            'path' => $file_path,
+                            'size' => filesize($file_path),
+                            'modified' => filemtime($file_path)
+                        ];
+                    }
+                }
+                // Sort by modification time (newest first)
+                usort($backup_files, function($a, $b) {
+                    return $b['modified'] - $a['modified'];
+                });
+            }
+            ?>
+
+            <?php if (!empty($backup_files)): ?>
+            <div class="mt-6 border-t pt-6">
+                <h3 class="text-lg font-semibold mb-4 flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                    </svg>
+                    Existing Backup Files (<?php echo count($backup_files); ?>)
+                </h3>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full table-auto">
+                        <thead>
+                            <tr class="bg-gray-50">
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Filename</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Size</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            <?php foreach ($backup_files as $file): ?>
+                            <tr>
+                                <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
+                                    <?php echo htmlspecialchars($file['name']); ?>
+                                </td>
+                                <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">
+                                    <?php echo number_format($file['size'] / 1024 / 1024, 2); ?> MB
+                                </td>
+                                <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">
+                                    <?php echo date('Y-m-d H:i:s', $file['modified']); ?>
+                                </td>
+                                <td class="px-4 py-2 whitespace-nowrap text-sm space-x-2">
+                                    <a href="backups/<?php echo urlencode($file['name']); ?>"
+                                       class="inline-flex items-center px-3 py-1 border border-transparent text-xs font-medium rounded text-blue-700 bg-blue-100 hover:bg-blue-200 transition duration-200"
+                                       download>
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                                        </svg>
+                                        Download
+                                    </a>
+                                    <form method="POST" class="inline-block" onsubmit="return confirm('Are you sure you want to delete this backup file?')">
+                                        <input type="hidden" name="action" value="delete_backup">
+                                        <input type="hidden" name="filename" value="<?php echo htmlspecialchars($file['name']); ?>">
+                                        <button type="submit"
+                                                class="inline-flex items-center px-3 py-1 border border-transparent text-xs font-medium rounded text-red-700 bg-red-100 hover:bg-red-200 transition duration-200">
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                                            </svg>
+                                            Delete
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <?php endif; ?>
         </div>
 
         <?php endif; ?>
