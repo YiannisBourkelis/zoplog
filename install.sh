@@ -935,10 +935,13 @@ run_migrations() {
     # Get the current batch number (increment from last batch)
     local current_batch
     if mysql_cmd "$DB_USER" "$DB_PASS" "$DB_NAME" -e "SELECT 1 FROM migrations LIMIT 1;" >/dev/null 2>&1; then
-        current_batch=$(mysql_cmd "$DB_USER" "$DB_PASS" "$DB_NAME" -sN -e "SELECT COALESCE(MAX(batch), 0) + 1 FROM migrations;")
+        current_batch=$(mysql_cmd "$DB_USER" "$DB_PASS" "$DB_NAME" -sN -e "SELECT COALESCE(MAX(batch), 0) + 1 FROM migrations;" 2>/dev/null || echo "1")
     else
         current_batch=1
     fi
+    
+    # Disable exit on error for the migration loop to handle errors gracefully
+    set +e
     
     # Run all migration files in chronological order (datetime prefix ensures this)
     local migrations_run=0
@@ -958,7 +961,7 @@ run_migrations() {
         # Check if migration has already been run
         local already_run
         if mysql_cmd "$DB_USER" "$DB_PASS" "$DB_NAME" -e "SELECT 1 FROM migrations LIMIT 1;" >/dev/null 2>&1; then
-            already_run=$(mysql_cmd "$DB_USER" "$DB_PASS" "$DB_NAME" -sN -e "SELECT COUNT(*) FROM migrations WHERE migration = '$migration_name';")
+            already_run=$(mysql_cmd "$DB_USER" "$DB_PASS" "$DB_NAME" -sN -e "SELECT COUNT(*) FROM migrations WHERE migration = '$migration_name';" 2>/dev/null || echo "0")
         else
             already_run=0
         fi
@@ -974,12 +977,13 @@ run_migrations() {
             while [ $retry_count -lt $max_retries ] && [ "$migration_success" = false ]; do
                 log_info "Executing migration SQL... (attempt $((retry_count + 1))/$max_retries)"
                 
+                # Execute migration
                 if (
                     echo "START TRANSACTION;"
                     cat "$migration_file"
                     echo "INSERT INTO migrations (migration, batch) VALUES ('$migration_name', $current_batch);"
                     echo "COMMIT;"
-                ) | mysql_cmd "$DB_USER" "$DB_PASS" "$DB_NAME"; then
+                ) | mysql_cmd "$DB_USER" "$DB_PASS" "$DB_NAME" 2>/dev/null; then
                     log_success "Migration completed: $migration_name"
                     migration_success=true
                     ((migrations_run++))
@@ -990,6 +994,8 @@ run_migrations() {
                         sleep 5
                     else
                         log_error "Migration failed after $max_retries attempts: $migration_name"
+                        # Re-enable exit on error before returning
+                        set -e
                         return 1
                     fi
                 fi
@@ -998,6 +1004,9 @@ run_migrations() {
             log_info "Migration already run: $migration_name (skipping)"
         fi
     done
+    
+    # Re-enable exit on error
+    set -e
     
     if [ $migrations_run -eq 0 ]; then
         log_info "No new migrations to run"
