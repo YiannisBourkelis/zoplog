@@ -73,9 +73,8 @@ def load_database_config() -> Dict[str, Any]:
                 print(f"Warning: Could not read config from {config_path}: {e}")
                 continue
     
-    # Final fallback for password if still empty
-    if not config['password']:
-        config['password'] = 'uxaz0F0XMDAG7X1pVRF8yGCTo5sT7dnYNAVwZukags4='
+    # If password is still empty, don't set a fallback - let it fail with proper error
+    # The installation process should ensure the config file has the correct password
     
     return config
 
