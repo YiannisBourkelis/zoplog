@@ -38,6 +38,20 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Helper function to build mysql command with proper password handling
+mysql_cmd() {
+    local db_user="$1"
+    local db_pass="$2"
+    local db_name="$3"
+    shift 3
+    
+    if [ -n "$db_pass" ]; then
+        mysql -u "$db_user" -p"$db_pass" "$db_name" "$@"
+    else
+        mysql -u "$db_user" "$db_name" "$@"
+    fi
+}
+
 # --- New: optional early interactive interface selection ---
 ask_user_interfaces() {
     # Skip if non-interactive
@@ -898,12 +912,16 @@ run_migrations() {
     migrations_table_file=$(find "$migrations_dir" -name "*_create_migrations_table.sql" | head -n1)
     if [ -f "$migrations_table_file" ]; then
         log_info "Creating migrations tracking table..."
-        mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < "$migrations_table_file"
+        mysql_cmd "$DB_USER" "$DB_PASS" "$DB_NAME" < "$migrations_table_file"
     fi
     
     # Get the current batch number (increment from last batch)
     local current_batch
-    current_batch=$(mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -sN -e "SELECT COALESCE(MAX(batch), 0) + 1 FROM migrations;" 2>/dev/null || echo "1")
+    if mysql_cmd "$DB_USER" "$DB_PASS" "$DB_NAME" -e "SELECT 1 FROM migrations LIMIT 1;" >/dev/null 2>&1; then
+        current_batch=$(mysql_cmd "$DB_USER" "$DB_PASS" "$DB_NAME" -sN -e "SELECT COALESCE(MAX(batch), 0) + 1 FROM migrations;")
+    else
+        current_batch=1
+    fi
     
     # Run all migration files in chronological order (datetime prefix ensures this)
     local migrations_run=0
@@ -922,18 +940,23 @@ run_migrations() {
         
         # Check if migration has already been run
         local already_run
-        already_run=$(mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -sN -e "SELECT COUNT(*) FROM migrations WHERE migration = '$migration_name';" 2>/dev/null || echo "0")
+        if mysql_cmd "$DB_USER" "$DB_PASS" "$DB_NAME" -e "SELECT 1 FROM migrations LIMIT 1;" >/dev/null 2>&1; then
+            already_run=$(mysql_cmd "$DB_USER" "$DB_PASS" "$DB_NAME" -sN -e "SELECT COUNT(*) FROM migrations WHERE migration = '$migration_name';")
+        else
+            already_run=0
+        fi
         
         if [ "$already_run" -eq "0" ]; then
             log_info "Running migration: $migration_name"
             
             # Start transaction for migration
-            mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" <<EOF
-START TRANSACTION;
-$(cat "$migration_file")
-INSERT INTO migrations (migration, batch) VALUES ('$migration_name', $current_batch);
-COMMIT;
-EOF
+            log_info "Executing migration SQL..."
+            (
+                echo "START TRANSACTION;"
+                cat "$migration_file"
+                echo "INSERT INTO migrations (migration, batch) VALUES ('$migration_name', $current_batch);"
+                echo "COMMIT;"
+            ) | mysql_cmd "$DB_USER" "$DB_PASS" "$DB_NAME"
             
             if [ $? -eq 0 ]; then
                 log_success "Migration completed: $migration_name"

@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS `packet_logs` (
 CREATE TABLE IF NOT EXISTS `blocked_events` (
   `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
   `event_time` datetime NOT NULL DEFAULT current_timestamp(),
-  `direction` enum('IN','OUT', 'FWD') NOT NULL,
+  `direction` enum('IN','OUT','FWD') NOT NULL,
   `src_ip_id` bigint(20) UNSIGNED DEFAULT NULL,
   `dst_ip_id` bigint(20) UNSIGNED DEFAULT NULL,
   `src_port` int(11) DEFAULT NULL,
