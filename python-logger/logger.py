@@ -21,43 +21,60 @@ except ImportError:
 bind_layers(TCP, HTTPRequest)
 
 # --- Global connection with better error handling ---
+# Module-level connection placeholders to avoid NameError when checking/using
+# the globals inside get_db_connection() before they've been initialized.
+conn = None
+cursor = None
 def get_db_connection():
     """Get database connection with automatic reconnection"""
     global conn, cursor
     try:
-        if not conn or not conn.open:
+        # If conn is falsy or closed, attempt to (re)connect.
+        if not conn or (hasattr(conn, 'open') and not conn.open):
             conn = mariadb.connect(**DB_CONFIG)
             cursor = conn.cursor()
         return conn, cursor
     except Exception as e:
-        print(f"Database connection error: {e}")
+        # More explicit error for easier debugging
+        print(f"Database connection error while connecting to {DB_CONFIG.get('host')}:{DB_CONFIG.get('database')}: {e}")
         try:
             conn = mariadb.connect(**DB_CONFIG)
             cursor = conn.cursor()
             return conn, cursor
         except Exception as e2:
-            print(f"Failed to reconnect to database: {e2}")
+            print(f"Failed to reconnect to database {DB_CONFIG.get('host')}/{DB_CONFIG.get('database')}: {e2}")
             raise
 
-# Initialize connection
-conn, cursor = get_db_connection()
+# Note: do not initialize the DB connection at import time. We use a
+# lazy/deferred connection via get_db_connection() so the module can be
+# imported for testing or for operations that don't need the DB.
 
 # --- DB helpers ---
-def get_or_insert(table, column, value):
+def get_or_insert(table, column, value, cursor=None):
+    """Insert value into table.column and return lastrowid. Caller may
+    supply a cursor to avoid repeated connection checks.
+    """
     if not value:
         return None
-    cursor.execute(
-        f"INSERT INTO {table} ({column}) VALUES (%s) "
-        f"ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)",
-        (value,)
-    )
-    return cursor.lastrowid
+    if cursor is None:
+        conn, cursor = get_db_connection()
+    try:
+        cursor.execute(
+            f"INSERT INTO {table} ({column}) VALUES (%s) "
+            f"ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)",
+            (value,)
+        )
+        return cursor.lastrowid
+    except Exception:
+        # Let caller handle errors; return None for safety
+        return None
 
 def get_or_insert_hostname_with_ip(hostname, ip_id):
     """Insert hostname with IP relationship or get existing one, updating IP if needed"""
     if not hostname:
         return None
     
+    conn, cursor = get_db_connection()
     # First check if hostname exists
     cursor.execute("SELECT id, ip_id FROM hostnames WHERE hostname = %s", (hostname,))
     result = cursor.fetchone()
@@ -77,11 +94,12 @@ def get_or_insert_hostname_with_ip(hostname, ip_id):
         )
         return cursor.lastrowid
 
-def get_or_insert_ip(ip_address):
-    return get_or_insert("ip_addresses", "ip_address", ip_address)
+def get_or_insert_ip(ip_address, cursor=None):
+    return get_or_insert("ip_addresses", "ip_address", ip_address, cursor=cursor)
 
-def get_or_insert_mac(mac_address):
-    return get_or_insert("mac_addresses", "mac_address", mac_address)
+
+def get_or_insert_mac(mac_address, cursor=None):
+    return get_or_insert("mac_addresses", "mac_address", mac_address, cursor=cursor)
 
 def insert_packet_log(packet_timestamp, src_ip, src_port, dst_ip, dst_port,
                       src_mac, dst_mac, method, hostname, path, user_agent,
@@ -91,15 +109,17 @@ def insert_packet_log(packet_timestamp, src_ip, src_port, dst_ip, dst_port,
     try:
         # Ensure we have a valid connection
         conn, cursor = get_db_connection()
-        
-        src_ip_id = get_or_insert_ip(src_ip)
-        dst_ip_id = get_or_insert_ip(dst_ip)
-        src_mac_id = get_or_insert_mac(src_mac)
-        dst_mac_id = get_or_insert_mac(dst_mac)
+
+        # Reuse the same cursor for all helper operations to minimize
+        # connection/cursor churn when recording a packet
+        src_ip_id = get_or_insert_ip(src_ip, cursor=cursor) if src_ip else None
+        dst_ip_id = get_or_insert_ip(dst_ip, cursor=cursor) if dst_ip else None
+        src_mac_id = get_or_insert_mac(src_mac, cursor=cursor) if src_mac else None
+        dst_mac_id = get_or_insert_mac(dst_mac, cursor=cursor) if dst_mac else None
         hostname_id = get_or_insert_hostname_with_ip(hostname, dst_ip_id) if hostname else None
-        path_id = get_or_insert("paths", "path", path) if path else None
-        user_agent_id = get_or_insert("user_agents", "user_agent", user_agent) if user_agent else None
-        accept_language_id = get_or_insert("accept_languages", "accept_language", accept_language) if accept_language else None
+        path_id = get_or_insert("paths", "path", path, cursor=cursor) if path else None
+        user_agent_id = get_or_insert("user_agents", "user_agent", user_agent, cursor=cursor) if user_agent else None
+        accept_language_id = get_or_insert("accept_languages", "accept_language", accept_language, cursor=cursor) if accept_language else None
 
         cursor.execute("""
             INSERT INTO packet_logs
@@ -142,12 +162,13 @@ def _normalize_hostname(host: str) -> str:
 
 def find_matching_blocklists_for_host(host: str):
     """Return blocklist IDs where active blocklists contain an exact match of `host`."""
+    # Use lazy connection
     global conn
     h = _normalize_hostname(host)
     if not h:
         return []
     try:
-        cur = conn.cursor()
+        conn, cur = get_db_connection()
         query = (
             "SELECT DISTINCT bd.blocklist_id "
             "FROM blocklist_domains bd "
@@ -221,7 +242,8 @@ def _record_blocked_ip(blocklist_domain_id: int, ip: str):
     if not ip or not blocklist_domain_id:
         return
     try:
-        ip_id = get_or_insert_ip(ip)
+        conn, cursor = get_db_connection()
+        ip_id = get_or_insert_ip(ip, cursor=cursor)
         if not ip_id:
             return
         # Upsert to track first/last_seen and hit_count
@@ -237,8 +259,7 @@ def _record_blocked_ip(blocklist_domain_id: int, ip: str):
     except mariadb.Error as e:
         if "MySQL server has gone away" in str(e):
             try:
-                conn = mariadb.connect(**DB_CONFIG)
-                cursor = conn.cursor()
+                conn, cursor = get_db_connection()
                 _record_blocked_ip(blocklist_domain_id, ip)
             except Exception as e2:
                 print(f"blocked_ips insert failed after reconnect: {e2}")
