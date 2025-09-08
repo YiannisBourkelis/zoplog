@@ -207,10 +207,9 @@ install_dependencies() {
         nginx \
         mariadb-server \
         mariadb-client \
-        software-properties-common \
         apt-transport-https \
         ca-certificates \
-        gnupg2 \
+        gnupg \
         nftables \
         bridge-utils \
         iptables \
