@@ -1,0 +1,39 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Python Debugger: Current File (with sudo)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [],
+            "python": "/usr/bin/python3",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "ZopLog Logger (with sudo) - Use Terminal",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/python-logger/logger.py",
+            "console": "integratedTerminal",
+            "python": "sudo /usr/bin/python3",
+            "presentation": {
+                "hidden": false,
+                "focus": true
+            }
+        }
+    ]
+}

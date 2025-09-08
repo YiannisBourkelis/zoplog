@@ -236,6 +236,34 @@ def find_matching_blocklist_domains(host: str, settings: dict = None):
         return []
 
 
+def is_host_whitelisted(host: str, settings: dict = None):
+    """Return True if host is in any active whitelist."""
+    if settings is None:
+        settings = load_system_settings()
+        
+    h = _normalize_hostname(host)
+    if not h:
+        return False
+    
+    try:
+        conn, cur = get_db_connection()
+        query = (
+            "SELECT 1 "
+            "FROM whitelist_domains wd "
+            "JOIN whitelists wl ON wl.id = wd.whitelist_id "
+            "WHERE wl.active = 'active' AND wd.domain = %s "
+            "LIMIT 1"
+        )
+        cur.execute(query, (h,))
+        row = cur.fetchone()
+        return row is not None
+    except Exception as e:
+        log_level = settings.get("log_level", "INFO").upper()
+        if log_level in ("DEBUG", "ALL"):
+            print(f"Warning: Whitelist lookup failed for {h}: {e}")
+        return False
+
+
 def _record_blocked_ip(blocklist_domain_id: int, ip: str):
     """Insert or update the blocked IP record linked to a specific blocklist_domain row."""
     global conn, cursor
@@ -354,9 +382,9 @@ def log_http_request(packet, settings: dict = None):
                       src_mac, dst_mac,
                       method, host, path, user_agent, accept_language, "HTTP")
 
-    # If host matches any active blocklist, add destination IP to corresponding set(s) and record it
+    # If host matches any active blocklist and is not whitelisted, add destination IP to corresponding set(s) and record it
     try:
-        if host and dst_ip:
+        if host and dst_ip and not is_host_whitelisted(host, settings):
             for bl_id, bd_id in find_matching_blocklist_domains(host, settings):
                 ipset_add_ip(bl_id, dst_ip, bd_id, settings)
     except Exception as e:
@@ -527,9 +555,9 @@ def log_https_request(packet, settings: dict = None):
                       src_mac, dst_mac,
                       "TLS_CLIENTHELLO", hostname, None, None, None, "HTTPS")
 
-    # If SNI matches any active blocklist, add destination IP to corresponding set(s) and record it
+    # If SNI matches any active blocklist and is not whitelisted, add destination IP to corresponding set(s) and record it
     try:
-        if hostname and dst_ip:
+        if hostname and dst_ip and not is_host_whitelisted(hostname, settings):
             for bl_id, bd_id in find_matching_blocklist_domains(hostname, settings):
                 ipset_add_ip(bl_id, dst_ip, bd_id, settings)
     except Exception as e:
