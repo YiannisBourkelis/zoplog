@@ -1004,10 +1004,20 @@ async function updateChartsRealtime() {
       const summary = data.summary;
       
       // Update summary card values
-      document.querySelector('.text-blue-600').textContent = summary.total_requests.toLocaleString();
-      document.querySelector('.text-green-600').textContent = summary.allowed_requests.toLocaleString();
-      document.querySelector('.text-red-600').textContent = summary.blocked_requests.toLocaleString();
-      document.querySelector('.text-purple-600').textContent = summary.unique_ips.toLocaleString();
+      const totalRequests = parseInt(summary.allowed_requests) + parseInt(summary.blocked_requests);
+      // Find the Total Requests counter specifically by looking for the card with "Total Requests" heading
+      const totalRequestsCard = Array.from(document.querySelectorAll('.bg-white.rounded-2xl.shadow')).find(card => 
+        card.querySelector('h2') && card.querySelector('h2').textContent === 'Total Requests'
+      );
+      if (totalRequestsCard) {
+        const totalRequestsElement = totalRequestsCard.querySelector('.text-blue-600');
+        if (totalRequestsElement) {
+          totalRequestsElement.textContent = totalRequests.toLocaleString();
+        }
+      }
+      document.querySelector('.text-green-600').textContent = parseInt(summary.allowed_requests).toLocaleString();
+      document.querySelector('.text-red-600').textContent = parseInt(summary.blocked_requests).toLocaleString();
+      document.querySelector('.text-purple-600').textContent = parseInt(summary.unique_ips).toLocaleString();
     }
     
     // Update timeline chart
