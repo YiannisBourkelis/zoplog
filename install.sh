@@ -768,8 +768,11 @@ Name=$INTERNAL_IF
 Bridge=br-zoplog
 EOF
         
-        # Enable systemd-networkd
+        # Enable systemd-networkd (but don't start it during installation to avoid network disruption)
         systemctl enable systemd-networkd
+        
+        # Add a note that network will be reconfigured after reboot
+        log_info "Network configuration files created - bridge will be activated after reboot"
         
         # Configure br_netfilter module for bridge firewall support
         log_info "Configuring br_netfilter module for bridge firewall support..."
@@ -912,7 +915,10 @@ run_migrations() {
     migrations_table_file=$(find "$migrations_dir" -name "*_create_migrations_table.sql" | head -n1)
     if [ -f "$migrations_table_file" ]; then
         log_info "Creating migrations tracking table..."
-        mysql_cmd "$DB_USER" "$DB_PASS" "$DB_NAME" < "$migrations_table_file"
+        if ! mysql_cmd "$DB_USER" "$DB_PASS" "$DB_NAME" < "$migrations_table_file"; then
+            log_error "Failed to create migrations tracking table"
+            return 1
+        fi
     fi
     
     # Get the current batch number (increment from last batch)
@@ -949,22 +955,34 @@ run_migrations() {
         if [ "$already_run" -eq "0" ]; then
             log_info "Running migration: $migration_name"
             
-            # Start transaction for migration
-            log_info "Executing migration SQL..."
-            (
-                echo "START TRANSACTION;"
-                cat "$migration_file"
-                echo "INSERT INTO migrations (migration, batch) VALUES ('$migration_name', $current_batch);"
-                echo "COMMIT;"
-            ) | mysql_cmd "$DB_USER" "$DB_PASS" "$DB_NAME"
+            # Start transaction for migration with retry logic
+            local retry_count=0
+            local max_retries=3
+            local migration_success=false
             
-            if [ $? -eq 0 ]; then
-                log_success "Migration completed: $migration_name"
-                ((migrations_run++))
-            else
-                log_error "Migration failed: $migration_name"
-                return 1
-            fi
+            while [ $retry_count -lt $max_retries ] && [ "$migration_success" = false ]; do
+                log_info "Executing migration SQL... (attempt $((retry_count + 1))/$max_retries)"
+                
+                if (
+                    echo "START TRANSACTION;"
+                    cat "$migration_file"
+                    echo "INSERT INTO migrations (migration, batch) VALUES ('$migration_name', $current_batch);"
+                    echo "COMMIT;"
+                ) | mysql_cmd "$DB_USER" "$DB_PASS" "$DB_NAME"; then
+                    log_success "Migration completed: $migration_name"
+                    migration_success=true
+                    ((migrations_run++))
+                else
+                    ((retry_count++))
+                    if [ $retry_count -lt $max_retries ]; then
+                        log_warning "Migration failed, retrying in 5 seconds... ($retry_count/$max_retries)"
+                        sleep 5
+                    else
+                        log_error "Migration failed after $max_retries attempts: $migration_name"
+                        return 1
+                    fi
+                fi
+            done
         else
             log_info "Migration already run: $migration_name (skipping)"
         fi
@@ -1009,17 +1027,14 @@ show_completion_message() {
     echo "  • Blocklists: http://$local_ip/blocklists.php"
     echo
     echo -e "${BLUE}🔧 Next Steps:${NC}"
-    echo "  1. Reboot your system to fully activate network bridge:"
-    echo -e "     ${YELLOW}sudo reboot${NC}"
-    echo
-    echo "  2. After reboot, ZopLog services will start automatically!"
+    echo "  1. After reboot, ZopLog services will start automatically!"
     echo "     Services are already enabled for boot startup."
     echo
-    echo "  3. Check service status after reboot:"
+    echo "  2. Check service status after reboot:"
     echo -e "     ${YELLOW}sudo systemctl status zoplog-logger${NC}"
     echo -e "     ${YELLOW}sudo systemctl status zoplog-blockreader${NC}"
     echo
-    echo "  4. If services need manual restart:"
+    echo "  3. If services need manual restart:"
     echo -e "     ${YELLOW}sudo systemctl restart zoplog-logger zoplog-blockreader${NC}"
     echo
     echo -e "${BLUE}📚 Documentation:${NC}"
@@ -1032,6 +1047,35 @@ show_completion_message() {
     echo "  • Configure firewall rules according to your network setup"
     echo
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    # Interactive reboot prompt
+    echo
+    echo -e "${YELLOW}🔄 System Reboot Required${NC}"
+    echo "The network bridge configuration requires a system reboot to take effect."
+    echo
+    
+    # Only prompt for reboot if running interactively
+    if [ -t 0 ]; then
+        read -p "Would you like to reboot now? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            log_info "Rebooting system in 5 seconds..."
+            sleep 5
+            sudo reboot
+        else
+            echo
+            echo -e "${BLUE}Manual reboot required:${NC}"
+            echo -e "  ${YELLOW}sudo reboot${NC}"
+            echo
+            echo -e "${GREEN}Installation complete! Please reboot when ready.${NC}"
+        fi
+    else
+        echo
+        echo -e "${BLUE}Manual reboot required:${NC}"
+        echo -e "  ${YELLOW}sudo reboot${NC}"
+        echo
+        echo -e "${GREEN}Installation complete! Please reboot to activate the network bridge.${NC}"
+    fi
 }
 
 main() {
@@ -1060,9 +1104,9 @@ main() {
     setup_sudoers
     setup_nginx
     setup_scripts
+    create_database_schema
     setup_transparent_proxy
     setup_systemd_services
-    create_database_schema
     
     show_completion_message
 }
