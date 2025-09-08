@@ -277,6 +277,7 @@ create_zoplog_user() {
     else
         useradd --system --home-dir "$ZOPLOG_HOME" --create-home --shell /bin/bash "$ZOPLOG_USER"
         usermod -aG sudo "$ZOPLOG_USER"
+        usermod -aG systemd-journal "$ZOPLOG_USER"
         log_success "Created user: $ZOPLOG_USER"
     fi
 }
