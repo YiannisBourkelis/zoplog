@@ -325,43 +325,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $messageType = 'warning';
             }
         } elseif ($_POST['action'] === 'reboot_device') {
-            // Reboot with explicit commands so sudoers can safely allow them
-            $cmd = trim(shell_exec('command -v systemctl 2>/dev/null'));
-            if ($cmd) {
-                shell_exec('sudo -b ' . escapeshellcmd($cmd) . ' reboot >/dev/null 2>&1 &');
-            } else {
-                $cmd = trim(shell_exec('command -v shutdown 2>/dev/null'));
-                if ($cmd) {
-                    shell_exec('sudo -b ' . escapeshellcmd($cmd) . ' -r now >/dev/null 2>&1 &');
-                } else {
-                    $cmd = trim(shell_exec('command -v reboot 2>/dev/null'));
-                    if ($cmd) {
-                        shell_exec('sudo -b ' . escapeshellcmd($cmd) . ' >/dev/null 2>&1 &');
-                    }
-                }
+            // Reboot using explicit whitelisted paths from sudoers
+            if (file_exists('/bin/systemctl')) {
+                shell_exec('sudo -b /bin/systemctl reboot >/dev/null 2>&1 &');
+            } elseif (file_exists('/sbin/shutdown')) {
+                shell_exec('sudo -b /sbin/shutdown -r now >/dev/null 2>&1 &');
+            } elseif (file_exists('/sbin/reboot')) {
+                shell_exec('sudo -b /sbin/reboot >/dev/null 2>&1 &');
             }
             $message = "Device reboot initiated. The web interface will go offline shortly.";
             $messageType = 'warning';
         } elseif ($_POST['action'] === 'poweroff_device') {
-            // Power off with explicit commands so sudoers can safely allow them
-            $cmd = trim(shell_exec('command -v systemctl 2>/dev/null'));
-            if ($cmd) {
-                shell_exec('sudo -b ' . escapeshellcmd($cmd) . ' poweroff >/dev/null 2>&1 &');
-            } else {
-                $cmd = trim(shell_exec('command -v shutdown 2>/dev/null'));
-                if ($cmd) {
-                    shell_exec('sudo -b ' . escapeshellcmd($cmd) . ' -h now >/dev/null 2>&1 &');
-                } else {
-                    $cmd = trim(shell_exec('command -v poweroff 2>/dev/null'));
-                    if ($cmd) {
-                        shell_exec('sudo -b ' . escapeshellcmd($cmd) . ' >/dev/null 2>&1 &');
-                    } else {
-                        $cmd = trim(shell_exec('command -v halt 2>/dev/null'));
-                        if ($cmd) {
-                            shell_exec('sudo -b ' . escapeshellcmd($cmd) . ' -p >/dev/null 2>&1 &');
-                        }
-                    }
-                }
+            // Power off using explicit whitelisted paths from sudoers
+            if (file_exists('/bin/systemctl')) {
+                shell_exec('sudo -b /bin/systemctl poweroff >/dev/null 2>&1 &');
+            } elseif (file_exists('/sbin/shutdown')) {
+                shell_exec('sudo -b /sbin/shutdown -h now >/dev/null 2>&1 &');
+            } elseif (file_exists('/sbin/poweroff')) {
+                shell_exec('sudo -b /sbin/poweroff >/dev/null 2>&1 &');
+            } elseif (file_exists('/sbin/halt')) {
+                shell_exec('sudo -b /sbin/halt -p >/dev/null 2>&1 &');
             }
             $message = "Device power-off initiated. You will need to power it on manually.";
             $messageType = 'warning';

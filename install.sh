@@ -575,65 +575,60 @@ setup_sudoers() {
     cat > /etc/sudoers.d/zoplog <<EOF
 # ZopLog sudoers configuration
 
-# ZopLog firewall management for logger service
-zoplog ALL=(root) NOPASSWD: $ZOPLOG_HOME/zoplog/scripts/zoplog-firewall-*
-zoplog ALL=(root) NOPASSWD: $ZOPLOG_HOME/zoplog/scripts/zoplog-nft-*
+# Command aliases for clarity and to avoid argument mismatches
+Cmnd_Alias ZOPLOG_SCRIPTS = \
+    $ZOPLOG_HOME/zoplog/scripts/zoplog-firewall-*, \
+    $ZOPLOG_HOME/zoplog/scripts/zoplog-nft-*
 
-# ZopLog firewall management for web interface
-www-data ALL=(root) NOPASSWD: $ZOPLOG_HOME/zoplog/scripts/zoplog-firewall-*
-www-data ALL=(root) NOPASSWD: $ZOPLOG_HOME/zoplog/scripts/zoplog-nft-*
+Cmnd_Alias ZOPLOG_SYSTEMCTL = \
+    /bin/systemctl restart zoplog-logger, \
+    /bin/systemctl restart zoplog-blockreader, \
+    /bin/systemctl start zoplog-logger, \
+    /bin/systemctl start zoplog-blockreader, \
+    /bin/systemctl stop zoplog-logger, \
+    /bin/systemctl stop zoplog-blockreader, \
+    /bin/systemctl status zoplog-logger, \
+    /bin/systemctl status zoplog-blockreader, \
+    /bin/systemctl is-active zoplog-logger, \
+    /bin/systemctl is-active zoplog-blockreader, \
+    /bin/systemctl is-enabled zoplog-logger, \
+    /bin/systemctl is-enabled zoplog-blockreader
 
-# Allow www-data to manage ZopLog services without password
-www-data ALL=(ALL) NOPASSWD: /bin/systemctl restart zoplog-logger
-www-data ALL=(ALL) NOPASSWD: /bin/systemctl restart zoplog-blockreader  
-www-data ALL=(ALL) NOPASSWD: /bin/systemctl start zoplog-logger
-www-data ALL=(ALL) NOPASSWD: /bin/systemctl start zoplog-blockreader
-www-data ALL=(ALL) NOPASSWD: /bin/systemctl stop zoplog-logger
-www-data ALL=(ALL) NOPASSWD: /bin/systemctl stop zoplog-blockreader
-www-data ALL=(ALL) NOPASSWD: /bin/systemctl status zoplog-logger
-www-data ALL=(ALL) NOPASSWD: /bin/systemctl status zoplog-blockreader
-www-data ALL=(ALL) NOPASSWD: /bin/systemctl is-active zoplog-logger
-www-data ALL=(ALL) NOPASSWD: /bin/systemctl is-active zoplog-blockreader
-www-data ALL=(ALL) NOPASSWD: /bin/systemctl is-enabled zoplog-logger
-www-data ALL=(ALL) NOPASSWD: /bin/systemctl is-enabled zoplog-blockreader
-www-data ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u zoplog-logger*
-www-data ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u zoplog-blockreader*
+Cmnd_Alias ZOPLOG_CONFIG_FIX = \
+    /usr/bin/touch /etc/zoplog/zoplog.conf, \
+    /bin/mkdir -p /etc/zoplog, \
+    /bin/chown root:www-data /etc/zoplog, \
+    /bin/chown root:www-data /etc/zoplog/zoplog.conf, \
+    /bin/chmod 775 /etc/zoplog, \
+    /bin/chmod 660 /etc/zoplog/zoplog.conf
 
-# Allow www-data to fix configuration permissions
-www-data ALL=(ALL) NOPASSWD: /bin/chmod 660 /etc/zoplog/zoplog.conf
-www-data ALL=(ALL) NOPASSWD: /usr/bin/touch /etc/zoplog/zoplog.conf
-www-data ALL=(ALL) NOPASSWD: /bin/mkdir -p /etc/zoplog
-www-data ALL=(ALL) NOPASSWD: /bin/chown root:www-data /etc/zoplog
-www-data ALL=(ALL) NOPASSWD: /bin/chown root:www-data /etc/zoplog/zoplog.conf
-www-data ALL=(ALL) NOPASSWD: /bin/chmod 775 /etc/zoplog
+Cmnd_Alias ZOPLOG_POWER = \
+    /bin/systemctl reboot, \
+    /bin/systemctl poweroff, \
+    /sbin/shutdown -r now, \
+    /sbin/shutdown -h now, \
+    /sbin/reboot, \
+    /sbin/poweroff, \
+    /sbin/halt -p
 
-# Allow controlled system power actions from the web interface
-www-data ALL=(root) NOPASSWD: /bin/systemctl reboot
-www-data ALL=(root) NOPASSWD: /bin/systemctl poweroff
-www-data ALL=(root) NOPASSWD: /sbin/shutdown -r now
-www-data ALL=(root) NOPASSWD: /sbin/shutdown -h now
-www-data ALL=(root) NOPASSWD: /sbin/reboot
-www-data ALL=(root) NOPASSWD: /sbin/poweroff
-www-data ALL=(root) NOPASSWD: /sbin/halt -p
-
-# Also allow zoplog user equivalent power controls (for CLI/admin usage)
-zoplog ALL=(root) NOPASSWD: /bin/systemctl reboot
-zoplog ALL=(root) NOPASSWD: /bin/systemctl poweroff
-zoplog ALL=(root) NOPASSWD: /sbin/shutdown -r now
-zoplog ALL=(root) NOPASSWD: /sbin/shutdown -h now
-zoplog ALL=(root) NOPASSWD: /sbin/reboot
-zoplog ALL=(root) NOPASSWD: /sbin/poweroff
-zoplog ALL=(root) NOPASSWD: /sbin/halt -p
+# Permissions
+zoplog  ALL=(root) NOPASSWD: ZOPLOG_SCRIPTS, ZOPLOG_POWER
+www-data ALL=(root) NOPASSWD: ZOPLOG_SCRIPTS, ZOPLOG_POWER
+www-data ALL=(ALL)  NOPASSWD: ZOPLOG_SYSTEMCTL, ZOPLOG_CONFIG_FIX
 EOF
     
     # Set proper permissions for sudoers file
     chmod 440 /etc/sudoers.d/zoplog
     
     # Validate sudoers syntax
-    if ! visudo -c > /dev/null 2>&1; then
-        log_error "Sudoers configuration is invalid. Removing file."
+    if ! visudo -c 1>/dev/null 2>/tmp/visudo_err.$$.log; then
+        log_error "Sudoers configuration is invalid. Removing file. Details:" 
+        if [ -s /tmp/visudo_err.$$.log ]; then cat /tmp/visudo_err.$$.log; fi
         rm -f /etc/sudoers.d/zoplog
+        rm -f /tmp/visudo_err.$$.log
         return 1
+    else
+        rm -f /tmp/visudo_err.$$.log
     fi
     
     log_success "Sudoers permissions configured successfully"
