@@ -592,17 +592,27 @@ Cmnd_Alias ZOPLOG_SYSTEMCTL = \
     /bin/systemctl is-active zoplog-logger, \
     /bin/systemctl is-active zoplog-blockreader, \
     /bin/systemctl is-enabled zoplog-logger, \
-    /bin/systemctl is-enabled zoplog-blockreader
+    /bin/systemctl is-enabled zoplog-blockreader, \
+    /usr/bin/systemctl restart zoplog-logger, \
+    /usr/bin/systemctl restart zoplog-blockreader, \
+    /usr/bin/systemctl start zoplog-logger, \
+    /usr/bin/systemctl start zoplog-blockreader, \
+    /usr/bin/systemctl stop zoplog-logger, \
+    /usr/bin/systemctl stop zoplog-blockreader, \
+    /usr/bin/systemctl status zoplog-logger, \
+    /usr/bin/systemctl status zoplog-blockreader, \
+    /usr/bin/systemctl is-active zoplog-logger, \
+    /usr/bin/systemctl is-active zoplog-blockreader, \
+    /usr/bin/systemctl is-enabled zoplog-logger, \
+    /usr/bin/systemctl is-enabled zoplog-blockreader
 
-Cmnd_Alias ZOPLOG_CONFIG_FIX = \
-    /usr/bin/touch, \
-    /bin/mkdir, \
-    /bin/chown, \
-    /bin/chmod
+## Removed ZOPLOG_CONFIG_FIX alias; inline binaries in user spec to avoid alias/args issues
 
 Cmnd_Alias ZOPLOG_POWER = \
     /bin/systemctl reboot, \
     /bin/systemctl poweroff, \
+    /usr/bin/systemctl reboot, \
+    /usr/bin/systemctl poweroff, \
     /sbin/shutdown -r now, \
     /sbin/shutdown -h now, \
     /sbin/reboot, \
@@ -612,7 +622,7 @@ Cmnd_Alias ZOPLOG_POWER = \
 # Permissions
 zoplog  ALL=(root) NOPASSWD: ZOPLOG_SCRIPTS, ZOPLOG_POWER
 www-data ALL=(root) NOPASSWD: ZOPLOG_SCRIPTS, ZOPLOG_POWER
-www-data ALL=(ALL)  NOPASSWD: ZOPLOG_SYSTEMCTL, ZOPLOG_CONFIG_FIX
+www-data ALL=(ALL)  NOPASSWD: ZOPLOG_SYSTEMCTL, /usr/bin/touch, /bin/mkdir, /bin/chown, /bin/chmod
 EOF
     
     # Set proper permissions for sudoers file
