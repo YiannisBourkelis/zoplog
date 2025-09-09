@@ -80,12 +80,24 @@ function saveSystemSettings($settings) {
     $settingsFile = '/etc/zoplog/zoplog.conf';
     $settingsDir = dirname($settingsFile);
     
-    // Ensure directory exists
-    if (!is_dir($settingsDir)) {
-        if (!mkdir($settingsDir, 0755, true)) {
-            error_log("Could not create settings directory: $settingsDir");
-            return false;
-        }
+    // Ensure directory and file exist with correct permissions; escalate via sudo if needed
+    if (!is_dir($settingsDir) || !is_writable($settingsDir)) {
+        // Attempt to create/fix directory via sudo
+        @shell_exec('sudo /bin/mkdir -p ' . escapeshellarg($settingsDir) . ' 2>/dev/null');
+        @shell_exec('sudo /bin/chown root:www-data ' . escapeshellarg($settingsDir) . ' 2>/dev/null');
+        @shell_exec('sudo /bin/chmod 775 ' . escapeshellarg($settingsDir) . ' 2>/dev/null');
+    }
+    if (!file_exists($settingsFile) || !is_writable($settingsFile)) {
+        // Ensure the file exists and is writable by group
+        @shell_exec('sudo /usr/bin/touch ' . escapeshellarg($settingsFile) . ' 2>/dev/null');
+        @shell_exec('sudo /bin/chown root:www-data ' . escapeshellarg($settingsFile) . ' 2>/dev/null');
+        @shell_exec('sudo /bin/chmod 660 ' . escapeshellarg($settingsFile) . ' 2>/dev/null');
+    }
+    
+    // If still not writable, bail out
+    if (!is_writable($settingsFile)) {
+        error_log("Settings file not writable: $settingsFile");
+        return false;
     }
     
     $settings['last_updated'] = date('Y-m-d H:i:s');
@@ -280,6 +292,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($_POST['action'] === 'fix_config_permissions') {
             // Fix configuration file permissions
             $commands = [
+                'sudo touch /etc/zoplog/zoplog.conf',
+                'sudo chown root:www-data /etc/zoplog/zoplog.conf',
                 'sudo chmod 660 /etc/zoplog/zoplog.conf'
             ];
             
@@ -313,15 +327,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Reboot with explicit commands so sudoers can safely allow them
             $cmd = trim(shell_exec('command -v systemctl 2>/dev/null'));
             if ($cmd) {
-                shell_exec('sudo nohup ' . escapeshellcmd($cmd) . ' reboot >/dev/null 2>&1 &');
+                shell_exec('sudo -b ' . escapeshellcmd($cmd) . ' reboot >/dev/null 2>&1 &');
             } else {
                 $cmd = trim(shell_exec('command -v shutdown 2>/dev/null'));
                 if ($cmd) {
-                    shell_exec('sudo nohup ' . escapeshellcmd($cmd) . ' -r now >/dev/null 2>&1 &');
+                    shell_exec('sudo -b ' . escapeshellcmd($cmd) . ' -r now >/dev/null 2>&1 &');
                 } else {
                     $cmd = trim(shell_exec('command -v reboot 2>/dev/null'));
                     if ($cmd) {
-                        shell_exec('sudo nohup ' . escapeshellcmd($cmd) . ' >/dev/null 2>&1 &');
+                        shell_exec('sudo -b ' . escapeshellcmd($cmd) . ' >/dev/null 2>&1 &');
                     }
                 }
             }
@@ -331,19 +345,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Power off with explicit commands so sudoers can safely allow them
             $cmd = trim(shell_exec('command -v systemctl 2>/dev/null'));
             if ($cmd) {
-                shell_exec('sudo nohup ' . escapeshellcmd($cmd) . ' poweroff >/dev/null 2>&1 &');
+                shell_exec('sudo -b ' . escapeshellcmd($cmd) . ' poweroff >/dev/null 2>&1 &');
             } else {
                 $cmd = trim(shell_exec('command -v shutdown 2>/dev/null'));
                 if ($cmd) {
-                    shell_exec('sudo nohup ' . escapeshellcmd($cmd) . ' -h now >/dev/null 2>&1 &');
+                    shell_exec('sudo -b ' . escapeshellcmd($cmd) . ' -h now >/dev/null 2>&1 &');
                 } else {
                     $cmd = trim(shell_exec('command -v poweroff 2>/dev/null'));
                     if ($cmd) {
-                        shell_exec('sudo nohup ' . escapeshellcmd($cmd) . ' >/dev/null 2>&1 &');
+                        shell_exec('sudo -b ' . escapeshellcmd($cmd) . ' >/dev/null 2>&1 &');
                     } else {
                         $cmd = trim(shell_exec('command -v halt 2>/dev/null'));
                         if ($cmd) {
-                            shell_exec('sudo nohup ' . escapeshellcmd($cmd) . ' -p >/dev/null 2>&1 &');
+                            shell_exec('sudo -b ' . escapeshellcmd($cmd) . ' -p >/dev/null 2>&1 &');
                         }
                     }
                 }
@@ -414,28 +428,6 @@ $availableInterfaces = getAvailableInterfaces();
                 
                 <div>
                     <label for="monitor_interface" class="block text-sm font-medium text-gray-700 mb-2">
-                    <form method="POST" onsubmit="return confirm('Are you sure you want to reboot the device? This will interrupt all services.');">
-                        <input type="hidden" name="action" value="reboot_device">
-                        <button type="submit" 
-                                class="bg-red-600 text-white px-6 py-3 rounded-lg hover:bg-red-700 transition duration-200 flex items-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 3a9 9 0 11-7.446 3.985M13 3v4m0-4H9"/>
-                            </svg>
-                            Reboot Device
-                        </button>
-                    </form>
-
-                    <form method="POST" onsubmit="return confirm('Are you sure you want to power off the device? You will need to power it on manually.');">
-                        <input type="hidden" name="action" value="poweroff_device">
-                        <button type="submit" 
-                                class="bg-gray-700 text-white px-6 py-3 rounded-lg hover:bg-gray-800 transition duration-200 flex items-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
-                            </svg>
-                            Power Off
-                        </button>
-                    </form>
-
                         Select Interface for Traffic Monitoring:
                     </label>
                     <select name="monitor_interface" id="monitor_interface" 
@@ -594,6 +586,39 @@ $availableInterfaces = getAvailableInterfaces();
                     If you get "Could not save settings file" errors, try the "Fix Config Permissions" button first.<br>
                     If service restart fails, you may need to configure sudoers permissions for the web server.
                 </p>
+            </div>
+        </div>
+
+        <!-- Power Controls (after Service Management) -->
+        <div class="bg-white rounded-lg shadow-md p-6 mt-6">
+            <h2 class="text-xl font-semibold mb-4 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 3a9 9 0 11-7.446 3.985M13 3v4m0-4H9"/>
+                </svg>
+                Power Controls
+            </h2>
+            <div class="flex flex-wrap gap-4">
+                <form method="POST" onsubmit="return confirm('Are you sure you want to reboot the device? This will interrupt all services.');">
+                    <input type="hidden" name="action" value="reboot_device">
+                    <button type="submit" 
+                            class="bg-red-600 text-white px-6 py-3 rounded-lg hover:bg-red-700 transition duration-200 flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 3a9 9 0 11-7.446 3.985M13 3v4m0-4H9"/>
+                        </svg>
+                        Reboot Device
+                    </button>
+                </form>
+
+                <form method="POST" onsubmit="return confirm('Are you sure you want to power off the device? You will need to power it on manually.');">
+                    <input type="hidden" name="action" value="poweroff_device">
+                    <button type="submit" 
+                            class="bg-gray-700 text-white px-6 py-3 rounded-lg hover:bg-gray-800 transition duration-200 flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+                        </svg>
+                        Power Off
+                    </button>
+                </form>
             </div>
         </div>
 
