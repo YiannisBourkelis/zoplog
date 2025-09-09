@@ -595,12 +595,10 @@ Cmnd_Alias ZOPLOG_SYSTEMCTL = \
     /bin/systemctl is-enabled zoplog-blockreader
 
 Cmnd_Alias ZOPLOG_CONFIG_FIX = \
-    /usr/bin/touch /etc/zoplog/zoplog.conf, \
-    /bin/mkdir -p /etc/zoplog, \
-    /bin/chown root:www-data /etc/zoplog, \
-    /bin/chown root:www-data /etc/zoplog/zoplog.conf, \
-    /bin/chmod 775 /etc/zoplog, \
-    /bin/chmod 660 /etc/zoplog/zoplog.conf
+    /usr/bin/touch, \
+    /bin/mkdir, \
+    /bin/chown, \
+    /bin/chmod
 
 Cmnd_Alias ZOPLOG_POWER = \
     /bin/systemctl reboot, \
