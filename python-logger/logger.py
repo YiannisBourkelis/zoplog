@@ -1,5 +1,23 @@
 #!/usr/bin/env python3
 
+"""
+ZopLog Network Packet Logger
+
+This script monitors network traffic and logs HTTP/HTTPS requests for security analysis.
+It is designed to be completely stateless - settings are loaded once at startup and
+remain static throughout execution. No caching, no reloading, no external state.
+
+Key Features:
+- Monitors HTTP traffic on any TCP port
+- Extracts SNI from HTTPS/TLS handshakes on any TCP port
+- Logs to database with normalized schema
+- Integrates with firewall for automatic IP blocking
+- Supports whitelist/blacklist functionality
+
+Settings are loaded once at startup from /etc/zoplog/zoplog.conf
+To change settings, modify the config file and restart the service.
+"""
+
 import scapy.all as scapy
 from scapy.layers.http import HTTPRequest
 from scapy.packet import bind_layers
@@ -25,6 +43,7 @@ bind_layers(TCP, HTTPRequest)
 # the globals inside get_db_connection() before they've been initialized.
 conn = None
 cursor = None
+
 def get_db_connection():
     """Get database connection with automatic reconnection"""
     global conn, cursor
@@ -209,11 +228,8 @@ def find_matching_blocklists_for_host(host: str):
             pass
 
 
-def find_matching_blocklist_domains(host: str, settings: dict = None):
+def find_matching_blocklist_domains(host: str, settings: dict):
     """Return list of tuples (blocklist_id, blocklist_domain_id) for exact host matches in active blocklists."""
-    if settings is None:
-        settings = load_system_settings()
-        
     h = _normalize_hostname(host)
     if not h:
         return []
@@ -236,11 +252,8 @@ def find_matching_blocklist_domains(host: str, settings: dict = None):
         return []
 
 
-def is_host_whitelisted(host: str, settings: dict = None):
+def is_host_whitelisted(host: str, settings: dict):
     """Return True if host is in any active whitelist."""
-    if settings is None:
-        settings = load_system_settings()
-        
     h = _normalize_hostname(host)
     if not h:
         return False
@@ -355,10 +368,7 @@ def _get_ips(packet):
     return None, None
 
 
-def log_http_request(packet, settings: dict = None):
-    if settings is None:
-        settings = load_system_settings()
-        
+def log_http_request(packet, settings: dict):
     ts = datetime.fromtimestamp(float(packet.time)).strftime('%Y-%m-%d %H:%M:%S')
     http_request = packet[HTTPRequest]
 
@@ -422,8 +432,8 @@ def extract_tls_sni(packet):
         CLIENT_HELLO = 0x01
         SNI_EXTENSION = 0x0000
 
-        # Minimum ClientHello size check
-        if len(payload) < 80:  # Realistic minimum for ClientHello with SNI
+        # Minimum ClientHello size check - reduced for smaller handshakes
+        if len(payload) < 60:  # More realistic minimum
             return None
 
         # Check for TLS Handshake (ContentType 22) and ClientHello (type 1)
@@ -519,8 +529,10 @@ def extract_tls_sni(packet):
                         hostname_bytes = payload[name_start:name_start+name_len]
                         try:
                             hostname = hostname_bytes.decode('utf-8', errors='ignore').strip()
-                            if hostname:
-                                return hostname.lower().rstrip('.')
+                            if hostname and len(hostname) > 0:
+                                # Additional validation: hostname should contain at least one dot and be reasonable length
+                                if '.' in hostname and len(hostname) <= 253:
+                                    return hostname.lower().rstrip('.')
                         except UnicodeDecodeError:
                             pass
                 break  # Found SNI extension, no need to continue
@@ -537,10 +549,7 @@ def extract_tls_sni(packet):
         # Catch any other unexpected errors
         return None
 
-def log_https_request(packet, settings: dict = None):
-    if settings is None:
-        settings = load_system_settings()
-        
+def log_https_request(packet, settings: dict):
     ts = datetime.fromtimestamp(float(packet.time)).strftime('%Y-%m-%d %H:%M:%S')
 
     src_ip, dst_ip = _get_ips(packet)
@@ -550,9 +559,11 @@ def log_https_request(packet, settings: dict = None):
 
     hostname = extract_tls_sni(packet)
 
-    # Only print if INFO level or higher
+    # Debug logging for SNI extraction issues
     log_level = settings.get("log_level", "INFO").upper()
     if log_level in ("DEBUG", "ALL"):
+        if not hostname and dst_port == 443:
+            debug_print(f"DEBUG: Failed to extract SNI from HTTPS packet {src_ip}:{src_port} -> {dst_ip}:{dst_port}, payload size: {len(bytes(packet[scapy.Raw].load)) if packet.haslayer(scapy.Raw) else 0}", settings=settings)
         print(f"{ts}\t{src_ip}:{src_port} ({src_mac})\t{dst_ip}:{dst_port} ({dst_mac})\tHTTPS\t{hostname or 'N/A'}")
     
     insert_packet_log(ts, src_ip, src_port, dst_ip, dst_port,
@@ -567,22 +578,41 @@ def log_https_request(packet, settings: dict = None):
     except Exception as e:
         print(f"error during ipset add for HTTPS host={hostname} ip={dst_ip}: {e}")
 
-def tcp_packet_handler(packet):
+def tcp_packet_handler(packet, settings):
+    """
+    Process TCP packets and extract HTTP/HTTPS traffic on ANY port.
+    This function checks for HTTP requests and HTTPS SNI on all ports,
+    not just standard ports (80, 443, etc.).
+    """
     try:
-        # Load settings once per packet batch for performance
-        settings = load_system_settings()
-        
+        # Check for HTTP traffic on any port
         if packet.haslayer(HTTPRequest):
             log_http_request(packet, settings)
-        else:
+            return
+
+        # Check for HTTPS traffic (TLS with SNI) on any port
+        if settings.get("enable_sni_extraction", True):
             hostname = extract_tls_sni(packet)
             if hostname:
                 log_https_request(packet, settings)
-    except Exception:
-        pass
+                return
+
+        # Optional: Log other TCP traffic in debug mode for analysis
+        log_level = settings.get("log_level", "INFO").upper()
+        if log_level in ("DEBUG", "ALL") and packet.haslayer(scapy.TCP):
+            dst_port = packet[scapy.TCP].dport
+            src_port = packet[scapy.TCP].sport
+            src_ip, dst_ip = _get_ips(packet)
+            debug_print(f"DEBUG: Non-HTTP/HTTPS TCP packet: {src_ip}:{src_port} -> {dst_ip}:{dst_port}", settings=settings)
+
+    except Exception as e:
+        # Log errors in debug mode only to avoid spam
+        log_level = settings.get("log_level", "INFO").upper()
+        if log_level in ("DEBUG", "ALL"):
+            print(f"Packet processing error: {e}")
 
 def load_system_settings():
-    """Load system settings from centralized config file, return defaults if not found"""
+    """Load system settings from centralized config file - called once at startup"""
     try:
         if os.path.exists(SETTINGS_FILE):
             # Load from INI format (/etc/zoplog/zoplog.conf)
@@ -594,12 +624,16 @@ def load_system_settings():
     # Return defaults
     return {
         "monitor_interface": DEFAULT_MONITOR_INTERFACE,
-        "last_updated": None
+        "last_updated": None,
+        "enable_sni_extraction": True,
+        "enable_non_standard_ports": True,
+        "log_level": "INFO"
     }
 
 def debug_print(*args, settings: dict = None, **kwargs):
     """Conditional debug print - only prints if debug logging is enabled"""
     if settings is None:
+        # Fallback for functions that don't have settings passed
         settings = load_system_settings()
     
     log_level = settings.get("log_level", "INFO").upper()
@@ -641,12 +675,20 @@ def get_default_interface():
     return interface
 
 def main():
+    """Main function - settings are loaded once at startup and remain static"""
+    # Load settings once at startup - no caching, no reloading
+    settings = load_system_settings()
+    
     interface = get_default_interface()
     print(f"Monitoring HTTP/HTTPS traffic on {interface}...")
     print("Time\tSource\tDestination\tType\tMethod/Host")
 
+    # Create a packet handler that captures the settings
+    def packet_handler_with_settings(packet):
+        return tcp_packet_handler(packet, settings)
+
     try:
-        scapy.sniff(iface=interface, filter="tcp", prn=tcp_packet_handler, store=False)
+        scapy.sniff(iface=interface, filter="tcp", prn=packet_handler_with_settings, store=False)
     except KeyboardInterrupt:
         print("\nMonitoring stopped")
         cursor.close()
