@@ -1,31 +1,31 @@
 <?php
-// logger.php
+// blocked.php — View blocked traffic (from blocked_events)
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>ZopLog - Allowed Traffic</title>
+  <title>ZopLog - Blocked Traffic</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    /* New row highlighting */
-    .new-row {
-      background-color: #d1fae5; /* light green */
-      transition: background-color 3s ease;
-    }
+    .new-row { background-color: #fee2e2; transition: background-color 3s ease; }
+    .truncate-cell { max-width: 28rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
 </head>
 <body class="bg-gray-100 text-gray-900">
   <?php include "menu.php"; ?>
   <div class="container mx-auto py-6">
     <div class="flex items-center space-x-3 mb-4">
-      <!-- Logger icon -->
       <span>
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-6a2 2 0 012-2h2a2 2 0 012 2v6m-6 0h6"/>
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636l-1.414-1.414A9 9 0 105.636 18.364l1.414-1.414A7 7 0 1116.95 7.05z" />
         </svg>
       </span>
-  <h1 class="text-2xl font-bold">Allowed Traffic</h1>
+  <h1 class="text-2xl font-bold">Blocked Traffic</h1>
     </div>
 
     <!-- Controls -->
@@ -42,84 +42,63 @@
       </label>
 
       <input id="filter-ip" type="text" placeholder="Filter by IP" class="border rounded px-2 py-1">
-      <input id="filter-mac" type="text" placeholder="Filter by MAC" class="border rounded px-2 py-1">
-      <input id="filter-hostname" type="text" placeholder="Filter by Hostname" class="border rounded px-2 py-1">
-
-      <select id="filter-method" class="border rounded px-2 py-1">
-        <option value="">Any Method</option>
-        <option value="GET">GET</option>
-        <option value="POST">POST</option>
-        <option value="PUT">PUT</option>
-        <option value="DELETE">DELETE</option>
-        <option value="HEAD">HEAD</option>
-        <option value="OPTIONS">OPTIONS</option>
-        <option value="PATCH">PATCH</option>
-        <option value="TLS_CLIENTHELLO">TLS_CLIENTHELLO</option>
-        <option value="N/A">N/A</option>
-      </select>
-
-      <select id="filter-type" class="border rounded px-2 py-1">
-        <option value="">Any Type</option>
-        <option value="HTTP">HTTP</option>
-        <option value="HTTPS">HTTPS</option>
-      </select>
+      <input id="filter-direction" type="text" placeholder="Direction (IN/OUT/FWD)" class="border rounded px-2 py-1">
+      <input id="filter-proto" type="text" placeholder="Protocol (TCP/UDP/ICMP)" class="border rounded px-2 py-1">
+      <input id="filter-iface" type="text" placeholder="Iface (IN/OUT)" class="border rounded px-2 py-1">
 
       <button id="apply-filters" class="bg-blue-500 text-white px-3 py-1 rounded">Apply Filters</button>
     </div>
 
-    <!-- Logs table -->
+    <!-- Table -->
     <div class="overflow-x-auto bg-white shadow rounded-lg">
       <table class="min-w-full text-sm text-left">
         <thead class="bg-gray-200">
           <tr>
             <th class="px-4 py-2">Time</th>
-            <th class="px-4 py-2">Src IP</th>
-            <th class="px-4 py-2">Src MAC</th>
-            <th class="px-4 py-2">Dst IP</th>
-            <th class="px-4 py-2">Dst MAC</th>
-            <th class="px-4 py-2">Type</th>
-            <th class="px-4 py-2">Method</th>
-            <th class="px-4 py-2">Host</th>
-            <th class="px-4 py-2">Path</th>
+            <th class="px-4 py-2">Direction</th>
+            <th class="px-4 py-2">Proto</th>
+            <th class="px-4 py-2">Src</th>
+            <th class="px-4 py-2">Dst</th>
+            <th class="px-4 py-2">IN Iface</th>
+            <th class="px-4 py-2">OUT Iface</th>
+            <th class="px-4 py-2">Message</th>
           </tr>
         </thead>
         <tbody id="logs-body"></tbody>
       </table>
     </div>
 
-    <!-- Loading indicator -->
     <div id="loading" class="text-center py-4 hidden">Loading...</div>
-
   </div>
 
-  <!-- Floating "new logs" banner -->
-  <div id="new-logs-banner" 
-       class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-4 py-2 rounded shadow-lg cursor-pointer">
-    🔄 New allowed traffic – click to view
+  <div id="new-logs-banner" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-4 py-2 rounded shadow-lg cursor-pointer">
+  🔄 New blocked traffic – click to view
   </div>
 
 <script>
 let offset = 0;
 let autoRefreshTimer = null;
 let latestTimestamp = null;
-let filters = { ip: "", mac: "", hostname: "", method: "", type: "" };
+let filters = { ip: "", direction: "", proto: "", iface: "" };
 let userAtTop = true;
 
 function renderRow(row) {
+  const src = `${row.src_ip || ''}${row.src_port ? ':'+row.src_port : ''}`;
+  const dst = `${row.dst_ip || ''}${row.dst_port ? ':'+row.dst_port : ''}`;
+  const msg = row.message || '';
   return `
-    <td class="px-4 py-2">${row.packet_timestamp}</td>
-    <td class="px-4 py-2">${row.src_ip}:${row.src_port}</td>
-    <td class="px-4 py-2">${row.src_mac || ""}</td>
-    <td class="px-4 py-2">${row.dst_ip}:${row.dst_port}</td>
-    <td class="px-4 py-2">${row.dst_mac || ""}</td>
-    <td class="px-4 py-2">${row.type}</td>
-    <td class="px-4 py-2">${row.method}</td>
-    <td class="px-4 py-2">${row.hostname || ""}</td>
-    <td class="px-4 py-2">${row.path || ""}</td>
+    <td class="px-4 py-2">${row.event_time}</td>
+    <td class="px-4 py-2">${row.direction}</td>
+    <td class="px-4 py-2">${row.proto || ''}</td>
+    <td class="px-4 py-2">${src}</td>
+    <td class="px-4 py-2">${dst}</td>
+    <td class="px-4 py-2">${row.iface_in || ''}</td>
+    <td class="px-4 py-2">${row.iface_out || ''}</td>
+    <td class="px-4 py-2 truncate-cell" title="${msg.replaceAll('"','&quot;')}">${msg}</td>
   `;
 }
 
-async function fetchLogs(reset=false, prepend=false) {
+async function fetchBlocked(reset=false, prepend=false) {
   const tbody = document.getElementById("logs-body");
   document.getElementById("loading").classList.remove("hidden");
 
@@ -127,10 +106,9 @@ async function fetchLogs(reset=false, prepend=false) {
     offset: reset ? 0 : offset,
     limit: 200,
     ip: filters.ip,
-    mac: filters.mac,
-    hostname: filters.hostname,
-    method: filters.method,
-    type: filters.type
+    direction: filters.direction,
+    proto: filters.proto,
+    iface: filters.iface
   });
 
   if (prepend && latestTimestamp) {
@@ -138,14 +116,13 @@ async function fetchLogs(reset=false, prepend=false) {
   }
 
   try {
-    const res = await fetch("fetch_logs.php?" + params.toString());
+    const res = await fetch("fetch_blocked.php?" + params.toString());
     const data = await res.json();
 
     if (prepend) {
       if (data.length > 0) {
-        latestTimestamp = data[data.length - 1].packet_timestamp;
+        latestTimestamp = data[data.length - 1].event_time;
         const fragment = document.createDocumentFragment();
-
         data.forEach(row => {
           const tr = document.createElement("tr");
           tr.innerHTML = renderRow(row);
@@ -153,9 +130,7 @@ async function fetchLogs(reset=false, prepend=false) {
           fragment.appendChild(tr);
           setTimeout(() => tr.classList.remove("new-row"), 3000);
         });
-
         tbody.insertBefore(fragment, tbody.firstChild);
-
         if (!userAtTop) {
           document.getElementById("new-logs-banner").classList.remove("hidden");
         } else {
@@ -167,7 +142,6 @@ async function fetchLogs(reset=false, prepend=false) {
         tbody.innerHTML = "";
         offset = 0;
       }
-
       const fragment = document.createDocumentFragment();
       data.forEach(row => {
         const tr = document.createElement("tr");
@@ -175,15 +149,13 @@ async function fetchLogs(reset=false, prepend=false) {
         fragment.appendChild(tr);
       });
       tbody.appendChild(fragment);
-
       if (data.length > 0) {
-        latestTimestamp = data[0].packet_timestamp;
+        latestTimestamp = data[0].event_time;
       }
-
       offset += data.length;
     }
   } catch (e) {
-    console.error("Fetch failed:", e);
+    console.error("Fetch blocked failed:", e);
   } finally {
     document.getElementById("loading").classList.add("hidden");
   }
@@ -192,46 +164,38 @@ async function fetchLogs(reset=false, prepend=false) {
 // Infinite scroll
 window.addEventListener("scroll", () => {
   if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 100) {
-    fetchLogs();
+    fetchBlocked();
   }
-
   userAtTop = window.scrollY < 50;
   if (userAtTop) document.getElementById("new-logs-banner").classList.add("hidden");
 });
 
 // Auto refresh
 const refreshSelect = document.getElementById("refresh-interval");
-
-// Load saved interval from localStorage
-const savedInterval = localStorage.getItem("refresh-interval");
+const savedInterval = localStorage.getItem("blocked-refresh-interval");
 if (savedInterval !== null) {
   refreshSelect.value = savedInterval;
 }
-
-// Listen for changes and save to localStorage
 refreshSelect.addEventListener("change", e => {
   clearInterval(autoRefreshTimer);
   const interval = parseInt(e.target.value);
-  localStorage.setItem("refresh-interval", e.target.value);
+  localStorage.setItem("blocked-refresh-interval", e.target.value);
   if (interval > 0) {
-    autoRefreshTimer = setInterval(() => fetchLogs(false, true), interval);
+    autoRefreshTimer = setInterval(() => fetchBlocked(false, true), interval);
   }
 });
-
-// If interval was set, start auto-refresh
 if (savedInterval && parseInt(savedInterval) > 0) {
-  autoRefreshTimer = setInterval(() => fetchLogs(false, true), parseInt(savedInterval));
+  autoRefreshTimer = setInterval(() => fetchBlocked(false, true), parseInt(savedInterval));
 }
 
 // Filters
 document.getElementById("apply-filters").addEventListener("click", () => {
   filters.ip = document.getElementById("filter-ip").value;
-  filters.mac = document.getElementById("filter-mac").value;
-  filters.hostname = document.getElementById("filter-hostname").value;
-  filters.method = document.getElementById("filter-method").value;
-  filters.type = document.getElementById("filter-type").value;
+  filters.direction = document.getElementById("filter-direction").value.toUpperCase();
+  filters.proto = document.getElementById("filter-proto").value.toUpperCase();
+  filters.iface = document.getElementById("filter-iface").value;
   latestTimestamp = null;
-  fetchLogs(true);
+  fetchBlocked(true);
 });
 
 // Banner click → jump to top
@@ -241,7 +205,7 @@ document.getElementById("new-logs-banner").addEventListener("click", () => {
 });
 
 // Initial load
-fetchLogs(true);
+fetchBlocked(true);
 </script>
 
 </body>

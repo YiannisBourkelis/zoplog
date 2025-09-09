@@ -17,7 +17,7 @@ if ($res) {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Whitelists</title>
+  <title>ZopLog - Whitelists</title>
   <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
   <style>
     .toggle-active.active { background-color: #d1fae5; color: #065f46; }

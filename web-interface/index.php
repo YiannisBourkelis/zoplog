@@ -435,7 +435,7 @@ for ($i = 9; $i >= 0; $i--) {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Network Dashboard</title>
+  <title>ZopLog - Network Dashboard</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
