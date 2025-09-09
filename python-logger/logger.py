@@ -21,22 +21,144 @@ To change settings, modify the config file and restart the service.
 import scapy.all as scapy
 from scapy.layers.http import HTTPRequest
 from scapy.packet import bind_layers
-from scapy.layers.inet import TCP
+from scapy.layers.inet import TCP, UDP
 from datetime import datetime
 from config import DB_CONFIG, DEFAULT_MONITOR_INTERFACE, SETTINGS_FILE, SCRIPTS_DIR
 import subprocess
 import json
 import os
 import struct
+import time
 
-# --- DB driver fallback (mysql-connector or PyMySQL) ---
-try:
-    import pymysql as mariadb
-except ImportError:
-    import mysql.connector as mariadb
+# --- DB driver: use PyMySQL ---
+import pymysql as mariadb
 
 # --- Ensure HTTP dissector works on all ports ---
+
 bind_layers(TCP, HTTPRequest)
+
+# --- Lightweight TCP flow buffer for TLS ClientHello reassembly ---
+# This helps extract SNI when ClientHello spans multiple TCP segments.
+FLOW_BUFFER_TTL = 3.0  # seconds to keep partial flows
+FLOW_BUFFER_MAXLEN = 8192  # clamp per-flow bytes to avoid memory bloat
+_flow_buffers: dict = {}
+_flow_last_cleanup = 0.0
+
+def _flow_key(packet):
+    try:
+        if packet.haslayer(scapy.IP):
+            return (packet[scapy.IP].src, packet[scapy.TCP].sport,
+                    packet[scapy.IP].dst, packet[scapy.TCP].dport)
+        if packet.haslayer(scapy.IPv6):
+            return (packet[scapy.IPv6].src, packet[scapy.TCP].sport,
+                    packet[scapy.IPv6].dst, packet[scapy.TCP].dport)
+    except Exception:
+        return None
+    return None
+
+def _flow_buffer_append(key, data: bytes):
+    now = time.time()
+    entry = _flow_buffers.get(key)
+    if entry is None:
+        entry = {"data": bytearray(), "ts": now}
+        _flow_buffers[key] = entry
+    entry["data"].extend(data)
+    # Clamp to maxlen (keep latest tail)
+    if len(entry["data"]) > FLOW_BUFFER_MAXLEN:
+        entry["data"] = entry["data"][-FLOW_BUFFER_MAXLEN:]
+    entry["ts"] = now
+
+def _flow_buffer_get(key) -> bytes | None:
+    entry = _flow_buffers.get(key)
+    if not entry:
+        return None
+    return bytes(entry["data"])
+
+def _flow_buffer_clear(key):
+    if key in _flow_buffers:
+        try:
+            del _flow_buffers[key]
+        except Exception:
+            pass
+
+def _flow_buffer_cleanup():
+    global _flow_last_cleanup
+    now = time.time()
+    # avoid doing it too often
+    if now - _flow_last_cleanup < 1.0:
+        return
+    _flow_last_cleanup = now
+    stale = [k for k, v in list(_flow_buffers.items()) if now - v.get("ts", 0) > FLOW_BUFFER_TTL]
+    for k in stale:
+        try:
+            del _flow_buffers[k]
+        except Exception:
+            pass
+
+# --- DNS cache for QUIC hostname inference ---
+DNS_CACHE_TTL = 120.0
+_dns_cache = {}  # key: (client_ip, server_ip) -> {host, ts}
+_dns_last_cleanup = 0.0
+_seen_quic_flows = {}   # key: (client_ip, sport, server_ip, dport) -> ts
+
+def _dns_put(client_ip: str, server_ip: str, host: str):
+    if not client_ip or not server_ip or not host:
+        return
+    _dns_cache[(client_ip, server_ip)] = {"host": host.lower().rstrip('.'), "ts": time.time()}
+
+def _dns_get(client_ip: str, server_ip: str) -> str | None:
+    rec = _dns_cache.get((client_ip, server_ip))
+    if not rec:
+        return None
+    if time.time() - rec.get("ts", 0) > DNS_CACHE_TTL:
+        try:
+            del _dns_cache[(client_ip, server_ip)]
+        except Exception:
+            pass
+        return None
+    return rec.get("host")
+
+def _dns_cleanup():
+    global _dns_last_cleanup
+    now = time.time()
+    if now - _dns_last_cleanup < 5.0:
+        return
+    _dns_last_cleanup = now
+    stale = [k for k, v in list(_dns_cache.items()) if now - v.get("ts", 0) > DNS_CACHE_TTL]
+    for k in stale:
+        try:
+            del _dns_cache[k]
+        except Exception:
+            pass
+    stale2 = [k for k, ts in list(_seen_quic_flows.items()) if now - ts > DNS_CACHE_TTL]
+    for k in stale2:
+        try:
+            del _seen_quic_flows[k]
+        except Exception:
+            pass
+
+def _process_dns_packet(packet, settings):
+    try:
+        if not packet.haslayer(scapy.DNS):
+            return
+        dns = packet[scapy.DNS]
+        if dns.qr != 1:
+            return
+        cip, sip = _get_ips(packet)
+        # Iterate answer RRs
+        for i in range(dns.ancount):
+            rr = dns.an[i]
+            if rr.type in (1, 28):  # A or AAAA
+                host = rr.rrname.decode('utf-8', errors='ignore') if isinstance(rr.rrname, bytes) else str(rr.rrname)
+                ip = rr.rdata if isinstance(rr.rdata, str) else None
+                if host and ip and cip:
+                    _dns_put(cip, ip, host)
+    except Exception as e:
+        log_level = settings.get("log_level", "INFO").upper()
+        if log_level in ("DEBUG", "ALL"):
+            print(f"DNS parse error: {e}")
+
+# (DNS cache removed by user request)
 
 # --- Global connection with better error handling ---
 # Module-level connection placeholders to avoid NameError when checking/using
@@ -220,12 +342,7 @@ def find_matching_blocklists_for_host(host: str):
             return []
     except Exception as e:
         print(f"Blocklist lookup unexpected error: {e}")
-        return []
-    finally:
-        try:
-            cur.close()
-        except Exception:
-            pass
+    return []
 
 
 def find_matching_blocklist_domains(host: str, settings: dict):
@@ -404,6 +521,81 @@ def log_http_request(packet, settings: dict):
     except Exception as e:
         print(f"error during ipset add for HTTP host={host} ip={dst_ip}: {e}")
 
+def parse_sni_from_bytes(payload: bytes) -> str | None:
+    """Parse SNI hostname from a TLS ClientHello given raw bytes.
+    Returns lowercase hostname or None if not found/invalid.
+    """
+    try:
+        TLS_HANDSHAKE = 0x16
+        CLIENT_HELLO = 0x01
+        SNI_EXTENSION = 0x0000
+
+        if not payload or len(payload) < 60:
+            return None
+
+        # TLS record header and handshake type
+        if payload[0] != TLS_HANDSHAKE or payload[5] != CLIENT_HELLO:
+            return None
+
+        idx = 9  # after record(5) + hs hdr(4)
+        idx += 34  # version + random
+
+        if idx >= len(payload):
+            return None
+        sid_len = payload[idx]
+        idx += 1 + sid_len
+
+        if idx + 2 > len(payload):
+            return None
+        cs_len = int.from_bytes(payload[idx:idx+2], 'big')
+        idx += 2 + cs_len
+
+        if idx >= len(payload):
+            return None
+        comp_len = payload[idx]
+        idx += 1 + comp_len
+
+        if idx + 2 > len(payload):
+            return None
+        ext_total_len = int.from_bytes(payload[idx:idx+2], 'big')
+        idx += 2
+        ext_end = idx + ext_total_len
+        if ext_end > len(payload):
+            return None
+
+        while idx + 4 <= ext_end:
+            ext_type = int.from_bytes(payload[idx:idx+2], 'big')
+            ext_len = int.from_bytes(payload[idx+2:idx+4], 'big')
+            ext_data_start = idx + 4
+            ext_data_end = ext_data_start + ext_len
+            if ext_data_end > ext_end:
+                break
+            if ext_type == SNI_EXTENSION:
+                sni_idx = ext_data_start
+                if ext_len < 5:
+                    break
+                sni_idx += 2  # name list len
+                if sni_idx + 3 > ext_data_end:
+                    break
+                name_type = payload[sni_idx]
+                if name_type == 0x00:
+                    name_len = int.from_bytes(payload[sni_idx+1:sni_idx+3], 'big')
+                    name_start = sni_idx + 3
+                    if name_start + name_len <= ext_data_end:
+                        hostname_bytes = payload[name_start:name_start+name_len]
+                        try:
+                            hostname = hostname_bytes.decode('utf-8', errors='ignore').strip()
+                            if hostname and '.' in hostname and len(hostname) <= 253:
+                                return hostname.lower().rstrip('.')
+                        except UnicodeDecodeError:
+                            return None
+                break
+            idx = ext_data_end
+        return None
+    except Exception:
+        return None
+
+
 def extract_tls_sni(packet):
     """
     Parse a TLS ClientHello packet to extract the Server Name Indication (SNI)
@@ -426,130 +618,12 @@ def extract_tls_sni(packet):
             return None
 
         payload = bytes(packet[scapy.Raw].load)
-
-        # Constants for TLS parsing
-        TLS_HANDSHAKE = 0x16
-        CLIENT_HELLO = 0x01
-        SNI_EXTENSION = 0x0000
-
-        # Minimum ClientHello size check - reduced for smaller handshakes
-        if len(payload) < 60:  # More realistic minimum
-            return None
-
-        # Check for TLS Handshake (ContentType 22) and ClientHello (type 1)
-        if payload[0] != TLS_HANDSHAKE or payload[5] != CLIENT_HELLO:
-            return None
-
-        # --- 2. Parse TLS Record and Handshake Headers ---
-        # TLS Record Header: ContentType (1) + Version (2) + Length (2) = 5 bytes
-        # Handshake Header: Type (1) + Length (3) = 4 bytes
-        # Total fixed header: 9 bytes
-
-        # ClientHello structure:
-        # - Version (2 bytes)
-        # - Random (32 bytes)
-        # - Session ID Length (1 byte)
-        # - Session ID (variable)
-        # - Cipher Suites Length (2 bytes)
-        # - Cipher Suites (variable)
-        # - Compression Methods Length (1 byte)
-        # - Compression Methods (variable)
-        # - Extensions Length (2 bytes)
-        # - Extensions (variable)
-
-        idx = 9  # Start after fixed headers
-
-        # Skip Version (2) + Random (32) = 34 bytes total from start
-        idx += 34
-
-        # Skip Session ID (1-byte length + variable data)
-        if idx >= len(payload):
-            return None
-        session_id_len = payload[idx]
-        idx += 1 + session_id_len
-
-        # Skip Cipher Suites (2-byte length + variable data)
-        if idx + 2 > len(payload):
-            return None
-        cipher_suites_len = int.from_bytes(payload[idx:idx+2], 'big')
-        idx += 2 + cipher_suites_len
-
-        # Skip Compression Methods (1-byte length + variable data)
-        if idx >= len(payload):
-            return None
-        compression_len = payload[idx]
-        idx += 1 + compression_len
-
-        # --- 3. Parse Extensions ---
-        if idx + 2 > len(payload):
-            return None
-
-        extensions_len = int.from_bytes(payload[idx:idx+2], 'big')
-        idx += 2
-        extensions_end = idx + extensions_len
-
-        if extensions_end > len(payload):
-            return None
-
-        # --- 4. Find and Parse SNI Extension ---
-        while idx + 4 <= extensions_end:
-            ext_type = int.from_bytes(payload[idx:idx+2], 'big')
-            ext_len = int.from_bytes(payload[idx+2:idx+4], 'big')
-            ext_data_start = idx + 4
-            ext_data_end = ext_data_start + ext_len
-
-            if ext_data_end > extensions_end:
-                break
-
-            if ext_type == SNI_EXTENSION:
-                # Parse SNI extension data
-                sni_idx = ext_data_start
-
-                # SNI Extension Structure:
-                # - Server Name List Length (2 bytes)
-                # - Server Name Type (1 byte) - should be 0x00 for hostname
-                # - Server Name Length (2 bytes)
-                # - Server Name (variable)
-
-                if ext_len < 5:  # Minimum SNI structure
-                    break
-
-                # Skip Server Name List Length (2 bytes) - usually just the length of the first name entry
-                sni_idx += 2
-
-                if sni_idx + 3 > ext_data_end:
-                    break
-
-                name_type = payload[sni_idx]
-                if name_type == 0x00:  # Type 0 = hostname
-                    name_len = int.from_bytes(payload[sni_idx+1:sni_idx+3], 'big')
-                    name_start = sni_idx + 3
-
-                    if name_start + name_len <= ext_data_end:
-                        hostname_bytes = payload[name_start:name_start+name_len]
-                        try:
-                            hostname = hostname_bytes.decode('utf-8', errors='ignore').strip()
-                            if hostname and len(hostname) > 0:
-                                # Additional validation: hostname should contain at least one dot and be reasonable length
-                                if '.' in hostname and len(hostname) <= 253:
-                                    return hostname.lower().rstrip('.')
-                        except UnicodeDecodeError:
-                            pass
-                break  # Found SNI extension, no need to continue
-
-            # Move to next extension
-            idx = ext_data_end
-
-        return None
-
-    except (IndexError, ValueError):
+        return parse_sni_from_bytes(payload)
+    except Exception:
         # Handle malformed packets gracefully
         return None
-    except Exception:
-        # Catch any other unexpected errors
-        return None
 
-def log_https_request(packet, settings: dict):
+def log_https_request(packet, settings: dict, hostname: str | None = None):
     ts = datetime.fromtimestamp(float(packet.time)).strftime('%Y-%m-%d %H:%M:%S')
 
     src_ip, dst_ip = _get_ips(packet)
@@ -557,7 +631,8 @@ def log_https_request(packet, settings: dict):
     src_mac = packet[scapy.Ether].src if packet.haslayer(scapy.Ether) else None
     dst_mac = packet[scapy.Ether].dst if packet.haslayer(scapy.Ether) else None
 
-    hostname = extract_tls_sni(packet)
+    if hostname is None:
+        hostname = extract_tls_sni(packet)
 
     # Debug logging for SNI extraction issues
     log_level = settings.get("log_level", "INFO").upper()
@@ -578,6 +653,33 @@ def log_https_request(packet, settings: dict):
     except Exception as e:
         print(f"error during ipset add for HTTPS host={hostname} ip={dst_ip}: {e}")
 
+# QUIC logging using DNS-inferred hostname
+def log_https_quic_request(packet, settings: dict, hostname: str | None = None):
+    ts = datetime.fromtimestamp(float(packet.time)).strftime('%Y-%m-%d %H:%M:%S')
+
+    src_ip, dst_ip = _get_ips(packet)
+    src_port, dst_port = (packet[scapy.UDP].sport if packet.haslayer(scapy.UDP) else None,
+                          packet[scapy.UDP].dport if packet.haslayer(scapy.UDP) else None)
+    src_mac = packet[scapy.Ether].src if packet.haslayer(scapy.Ether) else None
+    dst_mac = packet[scapy.Ether].dst if packet.haslayer(scapy.Ether) else None
+
+    log_level = settings.get("log_level", "INFO").upper()
+    if log_level in ("DEBUG", "ALL"):
+        print(f"{ts}\t{src_ip}:{src_port} ({src_mac})\t{dst_ip}:{dst_port} ({dst_mac})\tHTTPS_QUIC\t{hostname or 'N/A'}")
+
+    insert_packet_log(ts, src_ip, src_port, dst_ip, dst_port,
+                      src_mac, dst_mac,
+                      "QUIC", hostname, None, None, None, "HTTPS")
+
+    try:
+        if hostname and dst_ip and not is_host_whitelisted(hostname, settings):
+            for bl_id, bd_id in find_matching_blocklist_domains(hostname, settings):
+                ipset_add_ip(bl_id, dst_ip, bd_id, settings)
+    except Exception as e:
+        print(f"error during ipset add for HTTPS_QUIC host={hostname} ip={dst_ip}: {e}")
+
+# (QUIC logging removed by user request)
+
 def tcp_packet_handler(packet, settings):
     """
     Process TCP packets and extract HTTP/HTTPS traffic on ANY port.
@@ -594,8 +696,23 @@ def tcp_packet_handler(packet, settings):
         if settings.get("enable_sni_extraction", True):
             hostname = extract_tls_sni(packet)
             if hostname:
-                log_https_request(packet, settings)
+                log_https_request(packet, settings, hostname)
                 return
+
+            # Attempt simple reassembly using flow buffer
+            if packet.haslayer(scapy.Raw) and packet.haslayer(scapy.TCP):
+                key = _flow_key(packet)
+                if key:
+                    _flow_buffer_append(key, bytes(packet[scapy.Raw].load))
+                    buf = _flow_buffer_get(key)
+                    host2 = parse_sni_from_bytes(buf) if buf else None
+                    if host2:
+                        log_https_request(packet, settings, host2)
+                        _flow_buffer_clear(key)
+                        return
+
+        # Cleanup old flow buffers occasionally
+        _flow_buffer_cleanup()
 
         # Optional: Log other TCP traffic in debug mode for analysis
         log_level = settings.get("log_level", "INFO").upper()
@@ -685,10 +802,35 @@ def main():
 
     # Create a packet handler that captures the settings
     def packet_handler_with_settings(packet):
-        return tcp_packet_handler(packet, settings)
+        try:
+            # Update DNS cache from responses
+            if packet.haslayer(scapy.DNS):
+                _process_dns_packet(packet, settings)
+                _dns_cleanup()
+            # TCP handling (HTTP/HTTPS)
+            if packet.haslayer(scapy.TCP):
+                return tcp_packet_handler(packet, settings)
+            # QUIC handling via DNS inference
+            if packet.haslayer(scapy.UDP):
+                udp = packet[scapy.UDP]
+                if udp.dport == 443 or udp.sport == 443:
+                    src_ip, dst_ip = _get_ips(packet)
+                    sport, dport = udp.sport, udp.dport
+                    flow = (src_ip, sport, dst_ip, dport)
+                    if flow not in _seen_quic_flows:
+                        host = _dns_get(src_ip, dst_ip)
+                        if host:
+                            log_https_quic_request(packet, settings, host)
+                            _seen_quic_flows[flow] = time.time()
+                            return
+        except Exception as e:
+            log_level = settings.get("log_level", "INFO").upper()
+            if log_level in ("DEBUG", "ALL"):
+                print(f"handler error: {e}")
 
     try:
-        scapy.sniff(iface=interface, filter="tcp", prn=packet_handler_with_settings, store=False)
+        # Capture TCP for HTTP/HTTPS, UDP:53 for DNS, UDP:443 for QUIC
+        scapy.sniff(iface=interface, filter="tcp or udp port 53 or udp port 443", prn=packet_handler_with_settings, store=False)
     except KeyboardInterrupt:
         print("\nMonitoring stopped")
         cursor.close()
