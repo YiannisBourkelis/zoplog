@@ -309,6 +309,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $message = "Permission fix completed, but file may still not be writable:\n\n" . implode("\n", $outputs);
                 $messageType = 'warning';
             }
+        } elseif ($_POST['action'] === 'reboot_device') {
+            // Reboot with explicit commands so sudoers can safely allow them
+            $cmd = trim(shell_exec('command -v systemctl 2>/dev/null'));
+            if ($cmd) {
+                shell_exec('sudo nohup ' . escapeshellcmd($cmd) . ' reboot >/dev/null 2>&1 &');
+            } else {
+                $cmd = trim(shell_exec('command -v shutdown 2>/dev/null'));
+                if ($cmd) {
+                    shell_exec('sudo nohup ' . escapeshellcmd($cmd) . ' -r now >/dev/null 2>&1 &');
+                } else {
+                    $cmd = trim(shell_exec('command -v reboot 2>/dev/null'));
+                    if ($cmd) {
+                        shell_exec('sudo nohup ' . escapeshellcmd($cmd) . ' >/dev/null 2>&1 &');
+                    }
+                }
+            }
+            $message = "Device reboot initiated. The web interface will go offline shortly.";
+            $messageType = 'warning';
+        } elseif ($_POST['action'] === 'poweroff_device') {
+            // Power off with explicit commands so sudoers can safely allow them
+            $cmd = trim(shell_exec('command -v systemctl 2>/dev/null'));
+            if ($cmd) {
+                shell_exec('sudo nohup ' . escapeshellcmd($cmd) . ' poweroff >/dev/null 2>&1 &');
+            } else {
+                $cmd = trim(shell_exec('command -v shutdown 2>/dev/null'));
+                if ($cmd) {
+                    shell_exec('sudo nohup ' . escapeshellcmd($cmd) . ' -h now >/dev/null 2>&1 &');
+                } else {
+                    $cmd = trim(shell_exec('command -v poweroff 2>/dev/null'));
+                    if ($cmd) {
+                        shell_exec('sudo nohup ' . escapeshellcmd($cmd) . ' >/dev/null 2>&1 &');
+                    } else {
+                        $cmd = trim(shell_exec('command -v halt 2>/dev/null'));
+                        if ($cmd) {
+                            shell_exec('sudo nohup ' . escapeshellcmd($cmd) . ' -p >/dev/null 2>&1 &');
+                        }
+                    }
+                }
+            }
+            $message = "Device power-off initiated. You will need to power it on manually.";
+            $messageType = 'warning';
         }
     }
 }
@@ -373,6 +414,28 @@ $availableInterfaces = getAvailableInterfaces();
                 
                 <div>
                     <label for="monitor_interface" class="block text-sm font-medium text-gray-700 mb-2">
+                    <form method="POST" onsubmit="return confirm('Are you sure you want to reboot the device? This will interrupt all services.');">
+                        <input type="hidden" name="action" value="reboot_device">
+                        <button type="submit" 
+                                class="bg-red-600 text-white px-6 py-3 rounded-lg hover:bg-red-700 transition duration-200 flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 3a9 9 0 11-7.446 3.985M13 3v4m0-4H9"/>
+                            </svg>
+                            Reboot Device
+                        </button>
+                    </form>
+
+                    <form method="POST" onsubmit="return confirm('Are you sure you want to power off the device? You will need to power it on manually.');">
+                        <input type="hidden" name="action" value="poweroff_device">
+                        <button type="submit" 
+                                class="bg-gray-700 text-white px-6 py-3 rounded-lg hover:bg-gray-800 transition duration-200 flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+                            </svg>
+                            Power Off
+                        </button>
+                    </form>
+
                         Select Interface for Traffic Monitoring:
                     </label>
                     <select name="monitor_interface" id="monitor_interface" 

@@ -601,6 +601,15 @@ www-data ALL=(ALL) NOPASSWD: /usr/bin/journalctl -u zoplog-blockreader*
 
 # Allow www-data to fix configuration permissions
 www-data ALL=(ALL) NOPASSWD: /bin/chmod 660 /etc/zoplog/zoplog.conf
+
+# Allow controlled system power actions from the web interface
+www-data ALL=(root) NOPASSWD: /bin/systemctl reboot
+www-data ALL=(root) NOPASSWD: /bin/systemctl poweroff
+www-data ALL=(root) NOPASSWD: /sbin/shutdown -r now
+www-data ALL=(root) NOPASSWD: /sbin/shutdown -h now
+www-data ALL=(root) NOPASSWD: /sbin/reboot
+www-data ALL=(root) NOPASSWD: /sbin/poweroff
+www-data ALL=(root) NOPASSWD: /sbin/halt -p
 EOF
     
     # Set proper permissions for sudoers file
