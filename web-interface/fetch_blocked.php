@@ -57,10 +57,16 @@ if ($since) {
 
 $sql = "
 SELECT be.event_time, be.direction, be.src_port, be.dst_port, be.proto, be.iface_in, be.iface_out, be.message,
-       src_ip.ip_address AS src_ip, dst_ip.ip_address AS dst_ip
+             src_ip.ip_address AS src_ip, dst_ip.ip_address AS dst_ip,
+             h.hostname AS hostname
 FROM blocked_events be
 LEFT JOIN ip_addresses src_ip ON be.src_ip_id = src_ip.id
 LEFT JOIN ip_addresses dst_ip ON be.dst_ip_id = dst_ip.id
+LEFT JOIN (
+    SELECT ip_id, MIN(hostname) AS hostname
+    FROM hostnames
+    GROUP BY ip_id
+) h ON h.ip_id = dst_ip.id
 $where_sql
 ORDER BY be.event_time $order
 $limit_sql

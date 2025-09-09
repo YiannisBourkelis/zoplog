@@ -52,9 +52,10 @@
     <!-- Table -->
     <div class="overflow-x-auto bg-white shadow rounded-lg">
       <table class="min-w-full text-sm text-left">
-        <thead class="bg-gray-200">
+    <thead class="bg-gray-200">
           <tr>
             <th class="px-4 py-2">Time</th>
+      <th class="px-4 py-2">Hostname</th>
             <th class="px-4 py-2">Direction</th>
             <th class="px-4 py-2">Proto</th>
             <th class="px-4 py-2">Src</th>
@@ -88,6 +89,7 @@ function renderRow(row) {
   const msg = row.message || '';
   return `
     <td class="px-4 py-2">${row.event_time}</td>
+  <td class="px-4 py-2">${row.hostname ? row.hostname : ''}</td>
     <td class="px-4 py-2">${row.direction}</td>
     <td class="px-4 py-2">${row.proto || ''}</td>
     <td class="px-4 py-2">${src}</td>
