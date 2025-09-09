@@ -240,14 +240,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $message = "Error: Invalid interface for testing.";
                 $messageType = 'error';
             }
-        } elseif ($_POST['action'] === 'restart_services') {
+    } elseif ($_POST['action'] === 'restart_services') {
             $services = ['zoplog-logger', 'zoplog-blockreader'];
             $results = [];
             $allSuccess = true;
             
             foreach ($services as $service) {
-                $output = shell_exec("sudo systemctl restart $service 2>&1");
-                $status = shell_exec("sudo systemctl is-active $service 2>&1");
+        // Use explicit paths to match sudoers rules
+        $output = shell_exec('sudo /bin/systemctl restart ' . escapeshellarg($service) . ' 2>&1');
+        $status = shell_exec('sudo /bin/systemctl is-active ' . escapeshellarg($service) . ' 2>&1');
                 
                 if ($output === null) {
                     $results[] = "$service: Restart command executed";
@@ -265,7 +266,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             sleep(2);
             $message .= "\n\nFinal Status Check:";
             foreach ($services as $service) {
-                $status = shell_exec("sudo systemctl is-active $service 2>/dev/null");
+                $status = shell_exec('sudo /bin/systemctl is-active ' . escapeshellarg($service) . ' 2>/dev/null');
                 $message .= "\n$service: " . trim($status ?: 'unknown');
             }
         } elseif ($_POST['action'] === 'check_services') {
@@ -273,28 +274,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $results = [];
             
             foreach ($services as $service) {
-                $status = shell_exec("sudo systemctl is-active $service 2>/dev/null");
-                $enabled = shell_exec("sudo systemctl is-enabled $service 2>/dev/null");
+                $status = shell_exec('sudo /bin/systemctl is-active ' . escapeshellarg($service) . ' 2>/dev/null');
+                $enabled = shell_exec('sudo /bin/systemctl is-enabled ' . escapeshellarg($service) . ' 2>/dev/null');
                 $results[] = "$service:";
                 $results[] = "  Status: " . trim($status ?: 'unknown');
                 $results[] = "  Enabled: " . trim($enabled ?: 'unknown');
                 
-                // Get last few log lines
-                $logs = shell_exec("sudo journalctl -u $service --no-pager -n 3 --since '5 minutes ago' 2>/dev/null");
-                if ($logs) {
-                    $results[] = "  Recent logs: " . trim($logs);
+                // Get brief service status instead of journalctl to match sudoers
+                $svcStatus = shell_exec('sudo /bin/systemctl status ' . escapeshellarg($service) . ' 2>/dev/null');
+                if ($svcStatus) {
+                    $results[] = "  Status output: " . trim($svcStatus);
                 }
                 $results[] = "";
             }
             
             $message = "Service Status:\n" . implode("\n", $results);
             $messageType = 'info';
-        } elseif ($_POST['action'] === 'fix_config_permissions') {
+    } elseif ($_POST['action'] === 'fix_config_permissions') {
             // Fix configuration file permissions
             $commands = [
-                'sudo touch /etc/zoplog/zoplog.conf',
-                'sudo chown root:www-data /etc/zoplog/zoplog.conf',
-                'sudo chmod 660 /etc/zoplog/zoplog.conf'
+        'sudo /usr/bin/touch /etc/zoplog/zoplog.conf',
+        'sudo /bin/chown root:www-data /etc/zoplog/zoplog.conf',
+        'sudo /bin/chmod 660 /etc/zoplog/zoplog.conf'
             ];
             
             $outputs = [];
