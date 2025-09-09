@@ -7,6 +7,46 @@ $allowedCategories = [
   'adware','malware','phishing','cryptomining','tracking','scam','fakenews','gambling','social','porn','streaming','proxyvpn','shopping','hate','other'
 ];
 
+// Function to remove blocked IPs for a whitelisted domain
+function remove_blocked_ips_for_domain($domain) {
+    global $mysqli;
+    
+    // Find all blocklist domains that match this domain
+    $stmt = $mysqli->prepare('
+        SELECT bd.id, bd.blocklist_id, ip.ip_address
+        FROM blocklist_domains bd
+        JOIN blocked_ips bi ON bi.blocklist_domain_id = bd.id
+        JOIN ip_addresses ip ON ip.id = bi.ip_id
+        WHERE bd.domain = ?
+    ');
+    $stmt->bind_param('s', $domain);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    $ips_to_remove = [];
+    while ($row = $result->fetch_assoc()) {
+        $ips_to_remove[] = [
+            'ip' => $row['ip_address'],
+            'blocklist_id' => $row['blocklist_id']
+        ];
+    }
+    $stmt->close();
+    
+    // Remove each IP from the firewall
+    foreach ($ips_to_remove as $item) {
+        $ip = $item['ip'];
+        $blocklist_id = $item['blocklist_id'];
+        
+        // Determine if IPv4 or IPv6
+        $is_ipv6 = strpos($ip, ':') !== false;
+        $set_name = "zoplog-blocklist-{$blocklist_id}-" . ($is_ipv6 ? 'v6' : 'v4');
+        
+        // Use nft to delete the element from the set
+        $nft_cmd = "/usr/sbin/nft delete element inet zoplog {$set_name} { {$ip} } 2>/dev/null || true";
+        exec($nft_cmd);
+    }
+}
+
 // Params
 $whitelistId = isset($_GET['list']) ? intval($_GET['list']) : 0;
 if ($whitelistId <= 0) {
@@ -45,6 +85,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_domain'])) {
     $stmt->bind_param('is', $whitelistId, $domain);
     $stmt->execute();
     $stmt->close();
+    
+    // Remove blocked IPs for this whitelisted domain
+    remove_blocked_ips_for_domain($domain);
   }
 }
 

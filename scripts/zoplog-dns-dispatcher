@@ -1,0 +1,27 @@
+#!/bin/bash
+
+# NetworkManager dispatcher script to automatically set router as DNS
+# when br-zoplog interface comes up
+
+INTERFACE=$1
+STATUS=$2
+
+# Only process br-zoplog interface
+if [ "$INTERFACE" != "br-zoplog" ]; then
+    exit 0
+fi
+
+# Only process when interface comes up
+if [ "$STATUS" != "up" ]; then
+    exit 0
+fi
+
+# Get the router IP (gateway) for br-zoplog
+ROUTER_IP=$(ip route show dev br-zoplog | grep default | awk '{print $3}')
+
+if [ -n "$ROUTER_IP" ]; then
+    # Set the router as primary DNS for the bridge connection
+    nmcli connection modify br-zoplog ipv4.dns "$ROUTER_IP 8.8.8.8 8.8.4.4"
+
+    logger "DNS configured: Router $ROUTER_IP set as primary DNS for br-zoplog"
+fi

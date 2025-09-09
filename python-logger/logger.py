@@ -368,6 +368,10 @@ def log_http_request(packet, settings: dict = None):
     dst_mac = packet[scapy.Ether].dst if packet.haslayer(scapy.Ether) else None
 
     method = http_request.Method.decode()
+    # Validate method against known HTTP methods, map unknown ones to N/A
+    known_methods = {'GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'OPTIONS', 'PATCH', 'CONNECT', 'TRACE', 'PROPFIND', 'PROPPATCH', 'MKCOL', 'COPY', 'MOVE', 'LOCK', 'UNLOCK', 'N/A', 'TLS_CLIENTHELLO'}
+    if method not in known_methods:
+        method = 'N/A'
     host = http_request.Host.decode() if http_request.Host else None
     path = http_request.Path.decode() if http_request.Path else None
     user_agent = http_request.User_Agent.decode() if http_request.User_Agent else None

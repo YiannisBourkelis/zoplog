@@ -570,16 +570,14 @@ setup_web_interface() {
 
 setup_sudoers() {
     log_info "Setting up sudoers permissions for web interface and services..."
-    
-    # Remove any existing zoplog sudoers files to avoid conflicts
-    rm -f /etc/sudoers.d/zoplog /etc/sudoers.d/zoplog-web
-    
+
     # Create consolidated sudoers entry for ZopLog
     cat > /etc/sudoers.d/zoplog <<EOF
 # ZopLog sudoers configuration
 
 # ZopLog firewall management for logger service
-zoplog ALL=(root) NOPASSWD: $ZOPLOG_HOME/zoplog/scripts/zoplog-firewall-ipset-add
+zoplog ALL=(root) NOPASSWD: $ZOPLOG_HOME/zoplog/scripts/zoplog-firewall-*
+zoplog ALL=(root) NOPASSWD: $ZOPLOG_HOME/zoplog/scripts/zoplog-nft-*
 
 # ZopLog firewall management for web interface
 www-data ALL=(root) NOPASSWD: $ZOPLOG_HOME/zoplog/scripts/zoplog-firewall-*
@@ -820,6 +818,17 @@ EOF
     else
         log_info "Single interface mode - no bridge configuration needed"
         log_info "ZopLog will monitor traffic on $INTERNET_IF directly"
+    fi
+    
+    # Install DNS dispatcher script for automatic DNS configuration
+    if [ "$BRIDGE_MODE" = "dual" ]; then
+        log_info "Installing DNS dispatcher script for automatic DNS configuration..."
+        
+        # Copy the DNS dispatcher script to NetworkManager dispatcher directory
+        cp "$ZOPLOG_HOME/zoplog/scripts/zoplog-dns-dispatcher" /etc/NetworkManager/dispatcher.d/
+        chmod +x /etc/NetworkManager/dispatcher.d/zoplog-dns-dispatcher
+        
+        log_success "DNS dispatcher script installed successfully"
     fi
     
     log_success "Transparent proxy configuration completed"

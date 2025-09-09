@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS `packet_logs` (
   `src_port` int(10) UNSIGNED NOT NULL,
   `dst_ip_id` bigint(20) UNSIGNED DEFAULT NULL,
   `dst_port` int(10) UNSIGNED NOT NULL,
-  `method` enum('GET','POST','PUT','DELETE','HEAD','OPTIONS','PATCH','N/A','TLS_CLIENTHELLO') DEFAULT 'N/A',
+  `method` enum('GET','POST','PUT','DELETE','HEAD','OPTIONS','PATCH','CONNECT','TRACE','PROPFIND','PROPPATCH','MKCOL','COPY','MOVE','LOCK','UNLOCK','N/A','TLS_CLIENTHELLO') DEFAULT 'N/A',
   `hostname_id` bigint(20) UNSIGNED DEFAULT NULL,
   `path_id` bigint(20) UNSIGNED DEFAULT NULL,
   `user_agent_id` bigint(20) UNSIGNED DEFAULT NULL,
