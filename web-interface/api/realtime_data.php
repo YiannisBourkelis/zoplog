@@ -4,6 +4,9 @@ header('Content-Type: application/json');
 
 require_once __DIR__ . '/../zoplog_config.php';
 
+// Start session to store system timeline data
+session_start();
+
 // System Resources Monitoring Function
 function getSystemMetrics() {
     $metrics = [];
@@ -140,7 +143,7 @@ function getSystemMetrics() {
         $metrics['uptime'] = 'Unknown';
     }
     
-    $metrics['timestamp'] = date('H:i');
+    $metrics['timestamp'] = gmdate('H:i'); // Use GMT/UTC for consistency
     return $metrics;
 }
 
@@ -259,25 +262,53 @@ $blockedPercentage = $total10min > 0 ? round(($totalBlocked10min / $total10min) 
 // Get system metrics
 $systemMetrics = getSystemMetrics();
 
-// Create system timeline for the last 10 minutes (sample data with current values as base)
-$systemTimeline = [];
+// Manage system timeline in session (rolling 10-minute window)
 $currentTime = time();
-for ($i = 9; $i >= 0; $i--) {
-    $timestamp = date('H:i', $currentTime - ($i * 60));
-    // Generate sample data with some variation around current values
-    $cpuVariation = rand(-10, 10);
-    $memVariation = rand(-5, 5);
-    $diskVariation = rand(-2, 2);
-    $netVariation = rand(-15, 15);
-    
-    $systemTimeline[] = [
-        'timestamp' => $timestamp,
-        'cpu' => max(0, min(100, $systemMetrics['cpu'] + $cpuVariation)),
-        'memory' => max(0, min(100, $systemMetrics['memory'] + $memVariation)),
-        'disk' => max(0, min(100, $systemMetrics['disk'] + $diskVariation)),
-        'network' => max(0, min(100, $systemMetrics['network'] + $netVariation))
+$currentMinute = gmdate('H:i', $currentTime); // Use GMT/UTC to avoid timezone issues
+
+// Initialize or get existing timeline from session
+if (!isset($_SESSION['system_timeline'])) {
+    $_SESSION['system_timeline'] = [];
+}
+
+// Check if we need to add a new minute or update the current minute
+$lastEntry = end($_SESSION['system_timeline']);
+$shouldAddNewPoint = empty($_SESSION['system_timeline']) || 
+                    (isset($lastEntry['timestamp']) && $lastEntry['timestamp'] !== $currentMinute);
+
+if ($shouldAddNewPoint) {
+    // Add new data point for new minute
+    $_SESSION['system_timeline'][] = [
+        'timestamp' => $currentMinute,
+        'cpu' => $systemMetrics['cpu'],
+        'memory' => $systemMetrics['memory'],
+        'disk' => $systemMetrics['disk'],
+        'network' => $systemMetrics['network']
+    ];
+} else {
+    // Update the current minute's data point with fresh metrics
+    $lastIndex = count($_SESSION['system_timeline']) - 1;
+    $_SESSION['system_timeline'][$lastIndex] = [
+        'timestamp' => $currentMinute,
+        'cpu' => $systemMetrics['cpu'],
+        'memory' => $systemMetrics['memory'],
+        'disk' => $systemMetrics['disk'],
+        'network' => $systemMetrics['network']
     ];
 }
+
+// Clean up old entries (keep only last 10 minutes)
+$tenMinutesAgo = $currentTime - (10 * 60);
+$_SESSION['system_timeline'] = array_filter($_SESSION['system_timeline'], function($entry) use ($tenMinutesAgo) {
+    $entryTime = strtotime(gmdate('Y-m-d') . ' ' . $entry['timestamp'] . ':00');
+    return $entryTime >= $tenMinutesAgo;
+});
+
+// Re-index array after filtering
+$_SESSION['system_timeline'] = array_values($_SESSION['system_timeline']);
+
+// Use the session timeline data
+$systemTimeline = $_SESSION['system_timeline'];
 
 // Return all the data
 echo json_encode([

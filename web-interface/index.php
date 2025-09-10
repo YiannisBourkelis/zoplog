@@ -404,32 +404,23 @@ function getSystemMetrics() {
         $metrics['uptime'] = 'Unknown';
     }
     
-    $metrics['timestamp'] = date('H:i');
+    $metrics['timestamp'] = gmdate('H:i'); // Use GMT/UTC for consistency
     return $metrics;
 }
 
 // Collect current system metrics
 $currentMetrics = getSystemMetrics();
 
-// For demo purposes, create sample historical data (in production, you'd store this in DB)
-$systemTimeline = [];
-$currentTime = time();
-for ($i = 9; $i >= 0; $i--) {
-    $timestamp = date('H:i', $currentTime - ($i * 60));
-    // Generate sample data with some variation around current values
-    $cpuVariation = rand(-10, 10);
-    $memVariation = rand(-5, 5);
-    $diskVariation = rand(-2, 2);
-    $netVariation = rand(-15, 15);
-    
-    $systemTimeline[] = [
-        'timestamp' => $timestamp,
-        'cpu' => max(0, min(100, $currentMetrics['cpu'] + $cpuVariation)),
-        'memory' => max(0, min(100, $currentMetrics['memory'] + $memVariation)),
-        'disk' => max(0, min(100, $currentMetrics['disk'] + $diskVariation)),
-        'network' => max(0, min(100, $currentMetrics['network'] + $netVariation))
-    ];
-}
+// Initialize with just current data point (no fake history)
+$systemTimeline = [
+    [
+        'timestamp' => gmdate('H:i'), // Use GMT/UTC for consistency
+        'cpu' => $currentMetrics['cpu'],
+        'memory' => $currentMetrics['memory'],
+        'disk' => $currentMetrics['disk'],
+        'network' => $currentMetrics['network']
+    ]
+];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -841,6 +832,10 @@ systemChart = new Chart(document.getElementById('systemChart'), {
   data: systemData,
   options: {
     responsive: true,
+    animation: {
+      duration: 500, // Faster animation for real-time updates
+      easing: 'easeOutQuart'
+    },
     plugins: {
       legend: {
         position: 'top',
@@ -862,8 +857,20 @@ systemChart = new Chart(document.getElementById('systemChart'), {
       x: {
         title: {
           display: true,
-          text: 'Time (HH:MM)'
+          text: 'Time (HH:MM UTC)'
+        },
+        ticks: {
+          maxTicksLimit: 10
         }
+      }
+    },
+    elements: {
+      point: {
+        radius: 3,
+        hoverRadius: 6
+      },
+      line: {
+        tension: 0.3
       }
     }
   }
@@ -1079,14 +1086,14 @@ async function updateChartsRealtime() {
       }
     }
     
-    // Update system resources chart
+    // Update system resources chart (real-time updates every 2 seconds)
     if (systemChart && data.system_timeline) {
       systemChart.data.labels = data.system_timeline.map(item => item.timestamp);
       systemChart.data.datasets[0].data = data.system_timeline.map(item => item.cpu);
       systemChart.data.datasets[1].data = data.system_timeline.map(item => item.memory);
       systemChart.data.datasets[2].data = data.system_timeline.map(item => item.disk);
       systemChart.data.datasets[3].data = data.system_timeline.map(item => item.network);
-      systemChart.update('none');
+      systemChart.update('none'); // No animation for smooth real-time updates
     }
     
     // Update system metrics details
