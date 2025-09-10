@@ -446,10 +446,12 @@ EOF
     chmod 640 /etc/zoplog/database.conf
     
     # Create centralized system settings configuration with proper monitoring interface
+    MONITOR_INTERFACE="$INTERNET_IF"  # Always monitor the internet-facing interface
+    
     if [ "$BRIDGE_MODE" = "dual" ]; then
-        MONITOR_INTERFACE="br-zoplog"  # Use bridge when available
+        FIREWALL_INTERFACE="br-zoplog"  # Apply firewall rules to bridge in dual mode
     else
-        MONITOR_INTERFACE="$INTERNET_IF"  # Monitor internet interface directly in single mode
+        FIREWALL_INTERFACE="$INTERNET_IF"  # Apply firewall to internet interface in single mode
     fi
     
     cat > /etc/zoplog/zoplog.conf <<EOF
@@ -462,7 +464,7 @@ capture_mode = promiscuous
 log_level = INFO
 
 [firewall]
-apply_to_interface = $MONITOR_INTERFACE
+apply_to_interface = $FIREWALL_INTERFACE
 block_mode = immediate
 log_blocked = true
 
