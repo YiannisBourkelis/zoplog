@@ -543,10 +543,24 @@ setup_python_environment() {
     fi
     
     # Install systemd-python separately (may not be available on all systems)
-    sudo -u "$ZOPLOG_USER" ./venv/bin/pip install systemd-python || {
+    if sudo -u "$ZOPLOG_USER" ./venv/bin/pip install systemd-python; then
+        log_success "systemd-python installed via pip"
+    else
         log_warning "systemd-python not available via pip, trying system package..."
-        apt-get install -y python3-systemd || log_warning "systemd-python not available"
-    }
+        if apt-get install -y python3-systemd; then
+            log_success "python3-systemd installed via apt"
+            # Link system systemd module to venv
+            if [ -d "/usr/lib/python3/dist-packages/systemd" ]; then
+                ln -sf /usr/lib/python3/dist-packages/systemd ./venv/lib/python*/site-packages/ 2>/dev/null || {
+                    log_warning "Failed to link systemd module to venv"
+                }
+            else
+                log_warning "systemd module not found in system packages"
+            fi
+        else
+            log_warning "systemd-python not available via apt either"
+        fi
+    fi
     
     log_success "Python environment setup completed"
 }
