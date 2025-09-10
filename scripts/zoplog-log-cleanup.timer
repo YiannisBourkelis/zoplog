@@ -1,0 +1,11 @@
+[Unit]
+Description=Run ZopLog disk space cleanup hourly
+Requires=zoplog-log-cleanup.service
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

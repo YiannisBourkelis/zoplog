@@ -946,16 +946,53 @@ ReadWritePaths=$ZOPLOG_HOME
 [Install]
 WantedBy=multi-user.target
 EOF
-    
+
+    # ZopLog log cleanup service
+    cat > /etc/systemd/system/zoplog-log-cleanup.service <<EOF
+[Unit]
+Description=ZopLog Database Log Cleanup
+After=mariadb.service
+Requires=mariadb.service
+
+[Service]
+Type=oneshot
+User=$ZOPLOG_USER
+Group=$ZOPLOG_USER
+WorkingDirectory=$ZOPLOG_HOME/zoplog/python-logger
+ExecStart=$ZOPLOG_HOME/zoplog/python-logger/venv/bin/python log_cleanup.py --cleanup-orphaned --optimize
+TimeoutStartSec=3600
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # ZopLog log cleanup timer
+    cat > /etc/systemd/system/zoplog-log-cleanup.timer <<EOF
+[Unit]
+Description=Run ZopLog disk space cleanup hourly
+Requires=zoplog-log-cleanup.service
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
+EOF
+
     # Enable and start services
     systemctl daemon-reload
     systemctl enable zoplog-logger.service
     systemctl enable zoplog-blockreader.service
+    systemctl enable zoplog-log-cleanup.service
+    systemctl enable zoplog-log-cleanup.timer
     
     # Start services non-blocking to avoid hangs during install; they are also enabled for boot
     log_info "Starting ZopLog services (non-blocking)..."
     systemctl start --no-block zoplog-logger.service || log_warning "Could not start zoplog-logger service (will auto-start on boot)"
     systemctl start --no-block zoplog-blockreader.service || log_warning "Could not start zoplog-blockreader service (will auto-start on boot)"
+    systemctl start --no-block zoplog-log-cleanup.timer || log_warning "Could not start zoplog-log-cleanup timer (will auto-start on boot)"
     
     log_success "Systemd services created and enabled for boot startup"
 }
