@@ -513,9 +513,13 @@ def log_http_request(packet, settings: dict):
                       src_mac, dst_mac,
                       method, host, path, user_agent, accept_language, "HTTP")
 
+    # Whitelist overrides blacklist: if host is whitelisted, do nothing
+    if host and is_host_whitelisted(host, settings):
+        return
+
     # If host matches any active blocklist and is not whitelisted, add destination IP to corresponding set(s) and record it
     try:
-        if host and dst_ip and not is_host_whitelisted(host, settings):
+        if host and dst_ip:
             for bl_id, bd_id in find_matching_blocklist_domains(host, settings):
                 ipset_add_ip(bl_id, dst_ip, bd_id, settings)
     except Exception as e:
@@ -645,9 +649,13 @@ def log_https_request(packet, settings: dict, hostname: str | None = None):
                       src_mac, dst_mac,
                       "TLS_CLIENTHELLO", hostname, None, None, None, "HTTPS")
 
+    # Whitelist overrides blacklist: if host is whitelisted, do nothing
+    if hostname and is_host_whitelisted(hostname, settings):
+        return
+
     # If SNI matches any active blocklist and is not whitelisted, add destination IP to corresponding set(s) and record it
     try:
-        if hostname and dst_ip and not is_host_whitelisted(hostname, settings):
+        if hostname and dst_ip:
             for bl_id, bd_id in find_matching_blocklist_domains(hostname, settings):
                 ipset_add_ip(bl_id, dst_ip, bd_id, settings)
     except Exception as e:
@@ -671,8 +679,12 @@ def log_https_quic_request(packet, settings: dict, hostname: str | None = None):
                       src_mac, dst_mac,
                       "QUIC", hostname, None, None, None, "HTTPS")
 
+    # Whitelist overrides blacklist: if host is whitelisted, do nothing
+    if hostname and is_host_whitelisted(hostname, settings):
+        return
+
     try:
-        if hostname and dst_ip and not is_host_whitelisted(hostname, settings):
+        if hostname and dst_ip:
             for bl_id, bd_id in find_matching_blocklist_domains(hostname, settings):
                 ipset_add_ip(bl_id, dst_ip, bd_id, settings)
     except Exception as e:

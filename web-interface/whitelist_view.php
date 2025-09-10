@@ -32,7 +32,7 @@ function remove_blocked_ips_for_domain($domain) {
     }
     $stmt->close();
     
-    // Remove each IP from the firewall
+  // Remove each IP from the firewall
     foreach ($ips_to_remove as $item) {
         $ip = $item['ip'];
         $blocklist_id = $item['blocklist_id'];
@@ -40,10 +40,20 @@ function remove_blocked_ips_for_domain($domain) {
         // Determine if IPv4 or IPv6
         $is_ipv6 = strpos($ip, ':') !== false;
         $set_name = "zoplog-blocklist-{$blocklist_id}-" . ($is_ipv6 ? 'v6' : 'v4');
-        
-        // Use nft to delete the element from the set
-        $nft_cmd = "/usr/sbin/nft delete element inet zoplog {$set_name} { {$ip} } 2>/dev/null || true";
-        exec($nft_cmd);
+
+    // Use helper script via sudo to delete element from set
+    $fam = $is_ipv6 ? 'v6' : 'v4';
+    $script = '/opt/zoplog/zoplog/scripts/zoplog-nft-del-element';
+    if (file_exists($script)) {
+      $cmd = sprintf('sudo %s %s %s %s 2>/dev/null', escapeshellarg($script), escapeshellarg($fam), escapeshellarg($set_name), escapeshellarg($ip));
+      exec($cmd);
+    } else {
+      $devScript = realpath(__DIR__ . '/../scripts/zoplog-nft-del-element');
+      if ($devScript) {
+        $cmd = sprintf('%s %s %s %s 2>/dev/null', escapeshellarg($devScript), escapeshellarg($fam), escapeshellarg($set_name), escapeshellarg($ip));
+        exec($cmd);
+      }
+    }
     }
 }
 

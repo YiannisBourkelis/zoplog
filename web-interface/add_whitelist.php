@@ -1,4 +1,5 @@
 <?php
+header('Content-Type: application/json');
 // add_whitelist.php - Handle adding a new whitelist
 // Expects POST: name (required), category (required)
 
