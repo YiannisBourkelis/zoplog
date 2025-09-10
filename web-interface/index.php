@@ -471,9 +471,11 @@ for ($i = 9; $i >= 0; $i--) {
     <!-- Charts grid -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <!-- Traffic breakdown pie chart -->
-      <div class="bg-white rounded-2xl shadow p-6">
+      <div class="bg-white rounded-2xl shadow p-6 h-80 flex flex-col">
         <h2 class="text-xl font-semibold mb-4">Traffic Breakdown (Last 10 min)</h2>
-        <canvas id="trafficChart"></canvas>
+        <div class="flex-1">
+          <canvas id="trafficChart"></canvas>
+        </div>
         <div class="mt-4 text-center text-sm text-gray-600">
           <div class="flex justify-center space-x-4">
             <span class="flex items-center">
@@ -748,6 +750,7 @@ trafficChart = new Chart(document.getElementById('trafficChart'), {
   data: trafficData,
   options: {
     responsive: true,
+    maintainAspectRatio: false,
     plugins: {
       legend: {
         position: 'bottom',
