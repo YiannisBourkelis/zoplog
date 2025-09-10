@@ -448,23 +448,23 @@ for ($i = 9; $i >= 0; $i--) {
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
       <div class="bg-white rounded-2xl shadow p-6 text-center">
         <h2 class="text-xl font-semibold">Total Requests</h2>
-        <p class="text-3xl font-bold text-blue-600"><?= number_format($totalRequests) ?></p>
+        <p id="total-requests-count" class="text-3xl font-bold text-blue-600"><?= number_format($totalRequests) ?></p>
       </div>
       <div class="bg-white rounded-2xl shadow p-6 text-center">
         <h2 class="text-xl font-semibold">Allowed Requests</h2>
-        <p class="text-3xl font-bold text-green-600"><?= number_format($allowedRequests) ?></p>
+        <p id="allowed-requests-count" class="text-3xl font-bold text-green-600"><?= number_format($allowedRequests) ?></p>
       </div>
       <div class="bg-white rounded-2xl shadow p-6 text-center">
         <h2 class="text-xl font-semibold flex items-center justify-center">
           Blocked Requests
           <span class="ml-1 text-xs text-gray-500" title="Normalized - similar requests within 30-second windows are grouped to reduce retry noise">*</span>
         </h2>
-        <p class="text-3xl font-bold text-red-600"><?= number_format($blockedRequests) ?></p>
+        <p id="blocked-requests-count" class="text-3xl font-bold text-red-600"><?= number_format($blockedRequests) ?></p>
         <p class="text-xs text-gray-500 mt-1">Deduplicated</p>
       </div>
       <div class="bg-white rounded-2xl shadow p-6 text-center">
         <h2 class="text-xl font-semibold">Unique IPs</h2>
-        <p class="text-3xl font-bold text-purple-600"><?= number_format($uniqueIPs) ?></p>
+        <p id="unique-ips-count" class="text-3xl font-bold text-purple-600"><?= number_format($uniqueIPs) ?></p>
       </div>
     </div>
 
@@ -1005,19 +1005,14 @@ async function updateChartsRealtime() {
       
       // Update summary card values
       const totalRequests = parseInt(summary.allowed_requests) + parseInt(summary.blocked_requests);
-      // Find the Total Requests counter specifically by looking for the card with "Total Requests" heading
-      const totalRequestsCard = Array.from(document.querySelectorAll('.bg-white.rounded-2xl.shadow')).find(card => 
-        card.querySelector('h2') && card.querySelector('h2').textContent === 'Total Requests'
-      );
-      if (totalRequestsCard) {
-        const totalRequestsElement = totalRequestsCard.querySelector('.text-blue-600');
-        if (totalRequestsElement) {
-          totalRequestsElement.textContent = totalRequests.toLocaleString();
-        }
-      }
-      document.querySelector('.text-green-600').textContent = parseInt(summary.allowed_requests).toLocaleString();
-      document.querySelector('.text-red-600').textContent = parseInt(summary.blocked_requests).toLocaleString();
-      document.querySelector('.text-purple-600').textContent = parseInt(summary.unique_ips).toLocaleString();
+      const totalEl = document.getElementById('total-requests-count');
+      const allowedEl = document.getElementById('allowed-requests-count');
+      const blockedEl = document.getElementById('blocked-requests-count');
+      const uniqueEl = document.getElementById('unique-ips-count');
+      if (totalEl) totalEl.textContent = totalRequests.toLocaleString();
+      if (allowedEl) allowedEl.textContent = parseInt(summary.allowed_requests).toLocaleString();
+      if (blockedEl) blockedEl.textContent = parseInt(summary.blocked_requests).toLocaleString();
+      if (uniqueEl) uniqueEl.textContent = parseInt(summary.unique_ips).toLocaleString();
     }
     
     // Update timeline chart
