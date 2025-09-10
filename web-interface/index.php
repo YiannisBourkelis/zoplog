@@ -471,10 +471,10 @@ for ($i = 9; $i >= 0; $i--) {
     <!-- Charts grid -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <!-- Traffic breakdown pie chart -->
-      <div class="bg-white rounded-2xl shadow p-6 h-80 flex flex-col">
+      <div class="bg-white rounded-2xl shadow p-6 h-96">
         <h2 class="text-xl font-semibold mb-4">Traffic Breakdown (Last 10 min)</h2>
-        <div class="flex-1">
-          <canvas id="trafficChart"></canvas>
+        <div class="h-64 flex items-center justify-center">
+          <canvas id="trafficChart" class="max-w-full max-h-full"></canvas>
         </div>
         <div class="mt-4 text-center text-sm text-gray-600">
           <div class="flex justify-center space-x-4">
@@ -491,9 +491,11 @@ for ($i = 9; $i >= 0; $i--) {
       </div>
 
       <!-- Timeline chart -->
-      <div class="bg-white rounded-2xl shadow p-6">
+      <div class="bg-white rounded-2xl shadow p-6 h-96 flex flex-col">
         <h2 class="text-xl font-semibold mb-4">Requests Over Time (Last 10 min)</h2>
-        <canvas id="timelineChart"></canvas>
+        <div class="flex-1">
+          <canvas id="timelineChart"></canvas>
+        </div>
       </div>
     </div>
 
@@ -751,17 +753,35 @@ trafficChart = new Chart(document.getElementById('trafficChart'), {
   options: {
     responsive: true,
     maintainAspectRatio: false,
+    layout: {
+      padding: {
+        top: 10,
+        bottom: 10,
+        left: 10,
+        right: 10
+      }
+    },
     plugins: {
       legend: {
         position: 'bottom',
         labels: {
-          padding: 20,
-          usePointStyle: true
+          padding: 15,
+          usePointStyle: true,
+          font: {
+            size: 12
+          }
         }
       },
       title: {
         display: true,
-        text: 'Firewall Protection Overview'
+        text: 'Firewall Protection Overview',
+        font: {
+          size: 14
+        },
+        padding: {
+          top: 10,
+          bottom: 10
+        }
       },
       tooltip: {
         callbacks: {
