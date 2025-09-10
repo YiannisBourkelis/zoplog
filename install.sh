@@ -846,16 +846,14 @@ EOF
         log_info "ZopLog will monitor traffic on $INTERNET_IF directly"
     fi
     
-    # Install DNS dispatcher script for automatic DNS configuration
-    if [ "$BRIDGE_MODE" = "dual" ]; then
-        log_info "Installing DNS dispatcher script for automatic DNS configuration..."
-        
-        # Copy the DNS dispatcher script to NetworkManager dispatcher directory
-        cp "$ZOPLOG_HOME/zoplog/scripts/zoplog-dns-dispatcher" /etc/NetworkManager/dispatcher.d/
-        chmod +x /etc/NetworkManager/dispatcher.d/zoplog-dns-dispatcher
-        
-        log_success "DNS dispatcher script installed successfully"
-    fi
+    # Install DNS dispatcher script for automatic DNS configuration (both modes)
+    log_info "Installing DNS dispatcher script for automatic DNS configuration..."
+    # Ensure dispatcher directory exists
+    mkdir -p /etc/NetworkManager/dispatcher.d
+    # Copy the DNS dispatcher script to NetworkManager dispatcher directory
+    cp "$ZOPLOG_HOME/zoplog/scripts/zoplog-dns-dispatcher" /etc/NetworkManager/dispatcher.d/
+    chmod +x /etc/NetworkManager/dispatcher.d/zoplog-dns-dispatcher
+    log_success "DNS dispatcher script installed successfully"
     
     log_success "Transparent proxy configuration completed"
 }
