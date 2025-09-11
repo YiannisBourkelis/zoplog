@@ -143,7 +143,7 @@ function getSystemMetrics() {
         $metrics['uptime'] = 'Unknown';
     }
     
-    $metrics['timestamp'] = gmdate('H:i'); // Use GMT/UTC for consistency
+    $metrics['timestamp'] = gmdate('H:i:s'); // Use GMT/UTC with seconds for precision
     return $metrics;
 }
 
@@ -262,50 +262,38 @@ $blockedPercentage = $total10min > 0 ? round(($totalBlocked10min / $total10min) 
 // Get system metrics
 $systemMetrics = getSystemMetrics();
 
-// Manage system timeline in session (rolling 10-minute window)
+// Manage system timeline in session (rolling 60-second window)
 $currentTime = time();
-$currentMinute = gmdate('H:i', $currentTime); // Use GMT/UTC to avoid timezone issues
+$currentSecond = gmdate('H:i:s', $currentTime); // Use GMT/UTC with seconds for precision
 
 // Initialize or get existing timeline from session
 if (!isset($_SESSION['system_timeline'])) {
     $_SESSION['system_timeline'] = [];
 }
 
-// Check if we need to add a new minute or update the current minute
-$lastEntry = end($_SESSION['system_timeline']);
-$shouldAddNewPoint = empty($_SESSION['system_timeline']) || 
-                    (isset($lastEntry['timestamp']) && $lastEntry['timestamp'] !== $currentMinute);
+// Always add a new data point every 2 seconds
+$_SESSION['system_timeline'][] = [
+    'timestamp' => $currentSecond,
+    'cpu' => $systemMetrics['cpu'],
+    'memory' => $systemMetrics['memory'],
+    'disk' => $systemMetrics['disk'],
+    'network' => $systemMetrics['network']
+];
 
-if ($shouldAddNewPoint) {
-    // Add new data point for new minute
-    $_SESSION['system_timeline'][] = [
-        'timestamp' => $currentMinute,
-        'cpu' => $systemMetrics['cpu'],
-        'memory' => $systemMetrics['memory'],
-        'disk' => $systemMetrics['disk'],
-        'network' => $systemMetrics['network']
-    ];
-} else {
-    // Update the current minute's data point with fresh metrics
-    $lastIndex = count($_SESSION['system_timeline']) - 1;
-    $_SESSION['system_timeline'][$lastIndex] = [
-        'timestamp' => $currentMinute,
-        'cpu' => $systemMetrics['cpu'],
-        'memory' => $systemMetrics['memory'],
-        'disk' => $systemMetrics['disk'],
-        'network' => $systemMetrics['network']
-    ];
-}
-
-// Clean up old entries (keep only last 10 minutes)
-$tenMinutesAgo = $currentTime - (10 * 60);
-$_SESSION['system_timeline'] = array_filter($_SESSION['system_timeline'], function($entry) use ($tenMinutesAgo) {
-    $entryTime = strtotime(gmdate('Y-m-d') . ' ' . $entry['timestamp'] . ':00');
-    return $entryTime >= $tenMinutesAgo;
+// Clean up old entries (keep only last 60 seconds - about 30 data points at 2-second intervals)
+$sixtySecondsAgo = $currentTime - 60;
+$_SESSION['system_timeline'] = array_filter($_SESSION['system_timeline'], function($entry) use ($sixtySecondsAgo) {
+    $entryTime = strtotime(gmdate('Y-m-d') . ' ' . $entry['timestamp']);
+    return $entryTime >= $sixtySecondsAgo;
 });
 
 // Re-index array after filtering
 $_SESSION['system_timeline'] = array_values($_SESSION['system_timeline']);
+
+// Limit to maximum 30 data points to prevent memory issues
+if (count($_SESSION['system_timeline']) > 30) {
+    $_SESSION['system_timeline'] = array_slice($_SESSION['system_timeline'], -30);
+}
 
 // Use the session timeline data
 $systemTimeline = $_SESSION['system_timeline'];
@@ -327,7 +315,6 @@ echo json_encode([
         'blocked_percentage' => $blockedPercentage
     ],
     'system_metrics' => $systemMetrics,
-    'system_timeline' => $systemTimeline,
     'top_hosts' => $topHosts,
     'timestamp' => date('Y-m-d H:i:s')
 ]);

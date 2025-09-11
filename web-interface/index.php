@@ -404,7 +404,7 @@ function getSystemMetrics() {
         $metrics['uptime'] = 'Unknown';
     }
     
-    $metrics['timestamp'] = gmdate('H:i'); // Use GMT/UTC for consistency
+    $metrics['timestamp'] = gmdate('H:i:s'); // Use GMT/UTC with seconds for precision
     return $metrics;
 }
 
@@ -414,7 +414,7 @@ $currentMetrics = getSystemMetrics();
 // Initialize with just current data point (no fake history)
 $systemTimeline = [
     [
-        'timestamp' => gmdate('H:i'), // Use GMT/UTC for consistency
+        'timestamp' => gmdate('H:i:s'), // Use GMT/UTC with seconds for precision
         'cpu' => $currentMetrics['cpu'],
         'memory' => $currentMetrics['memory'],
         'disk' => $currentMetrics['disk'],
@@ -492,8 +492,8 @@ $systemTimeline = [
 
     <!-- System Resources Chart -->
     <div class="bg-white rounded-2xl shadow p-6 mt-6">
-      <h2 class="text-xl font-semibold mb-4">System Resources (Last 10 min)</h2>
-      <canvas id="systemChart"></canvas>
+      <h2 class="text-xl font-semibold mb-4">System Resources (Last 60 seconds)</h2>
+      <canvas id="systemChart" style="width: 100%; height: 300px;"></canvas>
       
       <!-- Detailed System Information Grid -->
       <div class="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -789,92 +789,159 @@ trafficChart = new Chart(document.getElementById('trafficChart'), {
   }
 });
 
-// System Resources Chart
-const systemData = {
-  labels: <?= json_encode(array_column($systemTimeline, "timestamp")) ?>,
-  datasets: [
-    {
-      label: 'CPU Usage %',
-      data: <?= json_encode(array_column($systemTimeline, "cpu")) ?>,
-      borderColor: '#3b82f6',
-      backgroundColor: 'rgba(59, 130, 246, 0.1)',
-      fill: false,
-      tension: 0.3
-    },
-    {
-      label: 'Memory Usage %',
-      data: <?= json_encode(array_column($systemTimeline, "memory")) ?>,
-      borderColor: '#10b981',
-      backgroundColor: 'rgba(16, 185, 129, 0.1)',
-      fill: false,
-      tension: 0.3
-    },
-    {
-      label: 'Disk Usage %',
-      data: <?= json_encode(array_column($systemTimeline, "disk")) ?>,
-      borderColor: '#f59e0b',
-      backgroundColor: 'rgba(245, 158, 11, 0.1)',
-      fill: false,
-      tension: 0.3
-    },
-    {
-      label: 'Network Activity %',
-      data: <?= json_encode(array_column($systemTimeline, "network")) ?>,
-      borderColor: '#8b5cf6',
-      backgroundColor: 'rgba(139, 92, 246, 0.1)',
-      fill: false,
-      tension: 0.3
-    }
-  ]
-};
-systemChart = new Chart(document.getElementById('systemChart'), {
-  type: 'line',
-  data: systemData,
-  options: {
-    responsive: true,
-    animation: {
-      duration: 500, // Faster animation for real-time updates
-      easing: 'easeOutQuart'
-    },
-    plugins: {
-      legend: {
-        position: 'top',
-      },
-      title: {
-        display: true,
-        text: 'System Resource Utilization'
-      }
-    },
-    scales: {
-      y: {
-        beginAtZero: true,
-        max: 100,
-        title: {
-          display: true,
-          text: 'Usage Percentage (%)'
-        }
-      },
-      x: {
-        title: {
-          display: true,
-          text: 'Time (HH:MM UTC)'
-        },
-        ticks: {
-          maxTicksLimit: 10
-        }
-      }
-    },
-    elements: {
-      point: {
-        radius: 3,
-        hoverRadius: 6
-      },
-      line: {
-        tension: 0.3
-      }
-    }
+// System Resources Chart - Custom HTML5 Canvas Implementation
+class SystemResourcesChart {
+  constructor(canvasId) {
+    this.canvas = document.getElementById(canvasId);
+    this.ctx = this.canvas.getContext('2d');
+    this.data = {
+      cpu: [],
+      memory: [],
+      disk: [],
+      network: []
+    };
+    this.maxPoints = 30; // 60 seconds at 2-second intervals
+    this.colors = {
+      cpu: '#3b82f6',
+      memory: '#10b981',
+      disk: '#f59e0b',
+      network: '#8b5cf6'
+    };
+    this.labels = {
+      cpu: 'CPU',
+      memory: 'Memory',
+      disk: 'Disk',
+      network: 'Network'
+    };
+
+    this.resize();
+    window.addEventListener('resize', () => this.resize());
   }
-});
+
+  resize() {
+    const rect = this.canvas.getBoundingClientRect();
+    this.canvas.width = rect.width * window.devicePixelRatio;
+    this.canvas.height = rect.height * window.devicePixelRatio;
+    this.ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    this.canvas.style.width = rect.width + 'px';
+    this.canvas.style.height = rect.height + 'px';
+    this.width = rect.width;
+    this.height = rect.height;
+    this.draw();
+  }
+
+  addDataPoint(metrics) {
+    // Add new data point to the right
+    this.data.cpu.push(metrics.cpu);
+    this.data.memory.push(metrics.memory);
+    this.data.disk.push(metrics.disk);
+    this.data.network.push(metrics.network);
+
+    // Keep only the last maxPoints
+    if (this.data.cpu.length > this.maxPoints) {
+      this.data.cpu.shift();
+      this.data.memory.shift();
+      this.data.disk.shift();
+      this.data.network.shift();
+    }
+
+    this.draw();
+  }
+
+  draw() {
+    this.ctx.clearRect(0, 0, this.width, this.height);
+
+    // Draw grid
+    this.ctx.strokeStyle = '#e5e7eb';
+    this.ctx.lineWidth = 1;
+
+    // Horizontal grid lines
+    for (let i = 0; i <= 4; i++) {
+      const y = (this.height - 60) * (i / 4) + 30;
+      this.ctx.beginPath();
+      this.ctx.moveTo(0, y);
+      this.ctx.lineTo(this.width, y);
+      this.ctx.stroke();
+
+      // Y-axis labels
+      this.ctx.fillStyle = '#6b7280';
+      this.ctx.font = '10px Arial';
+      this.ctx.textAlign = 'right';
+      this.ctx.fillText(`${100 - i * 25}%`, 25, y + 3);
+    }
+
+    // Vertical grid lines (time markers)
+    for (let i = 0; i <= 6; i++) {
+      const x = this.width * (i / 6);
+      this.ctx.beginPath();
+      this.ctx.moveTo(x, 30);
+      this.ctx.lineTo(x, this.height - 30);
+      this.ctx.stroke();
+
+      // Time labels
+      if (i > 0) {
+        const secondsAgo = (6 - i) * 10;
+        this.ctx.fillStyle = '#6b7280';
+        this.ctx.font = '9px Arial';
+        this.ctx.textAlign = 'center';
+        let label = '';
+        if (secondsAgo === 0) label = 'now';
+        else if (secondsAgo <= 10) label = `${secondsAgo}s`;
+        else if (secondsAgo <= 60) label = `${Math.floor(secondsAgo/10)*10}s`;
+        this.ctx.fillText(label, x, this.height - 10);
+      }
+    }
+
+    // Draw data lines
+    Object.keys(this.data).forEach(metric => {
+      if (this.data[metric].length === 0) return;
+
+      this.ctx.strokeStyle = this.colors[metric];
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+
+      const points = this.data[metric];
+      for (let i = 0; i < points.length; i++) {
+        const x = this.width - ((points.length - 1 - i) * (this.width / (this.maxPoints - 1)));
+        const y = 30 + ((100 - points[i]) / 100) * (this.height - 60);
+
+        if (i === 0) {
+          this.ctx.moveTo(x, y);
+        } else {
+          this.ctx.lineTo(x, y);
+        }
+      }
+
+      this.ctx.stroke();
+    });
+
+    // Draw legend
+    const legendY = 15;
+    let legendX = 10;
+    Object.keys(this.labels).forEach(metric => {
+      // Color box
+      this.ctx.fillStyle = this.colors[metric];
+      this.ctx.fillRect(legendX, legendY - 8, 12, 8);
+
+      // Label
+      this.ctx.fillStyle = '#374151';
+      this.ctx.font = '11px Arial';
+      this.ctx.textAlign = 'left';
+      this.ctx.fillText(this.labels[metric], legendX + 16, legendY);
+
+      legendX += 80;
+    });
+
+    // Title
+    this.ctx.fillStyle = '#111827';
+    this.ctx.font = '14px Arial';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('System Resources (Last 60 seconds)', this.width / 2, 15);
+  }
+}
+
+// Initialize custom system resources chart
+systemResourcesChart = new SystemResourcesChart('systemChart');
 
 // Requests over Time (Line Chart)
 const timelineData = {
@@ -1086,16 +1153,17 @@ async function updateChartsRealtime() {
       }
     }
     
-    // Update system resources chart (real-time updates every 2 seconds)
-    if (systemChart && data.system_timeline) {
-      systemChart.data.labels = data.system_timeline.map(item => item.timestamp);
-      systemChart.data.datasets[0].data = data.system_timeline.map(item => item.cpu);
-      systemChart.data.datasets[1].data = data.system_timeline.map(item => item.memory);
-      systemChart.data.datasets[2].data = data.system_timeline.map(item => item.disk);
-      systemChart.data.datasets[3].data = data.system_timeline.map(item => item.network);
-      systemChart.update('none'); // No animation for smooth real-time updates
+    // Update system resources chart (custom HTML5 canvas with smooth scrolling)
+    if (systemResourcesChart && data.system_metrics) {
+      // Add new data point to the custom chart
+      systemResourcesChart.addDataPoint({
+        cpu: data.system_metrics.cpu,
+        memory: data.system_metrics.memory,
+        disk: data.system_metrics.disk,
+        network: data.system_metrics.network
+      });
     }
-    
+
     // Update system metrics details
     if (data.system_metrics) {
       const metrics = data.system_metrics;
