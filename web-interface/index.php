@@ -50,7 +50,7 @@ while ($row = $topHostsRes->fetch_assoc()) {
 $allowedTimelineRes = $mysqli->query("
     SELECT DATE_FORMAT(packet_timestamp, '%H:%i') AS minute, COUNT(*) AS cnt
     FROM packet_logs
-    WHERE packet_timestamp >= NOW() - INTERVAL 10 MINUTE
+    WHERE packet_timestamp >= DATE_SUB(DATE_SUB(NOW(), INTERVAL MINUTE(NOW()) MINUTE), INTERVAL 10 MINUTE)
     GROUP BY minute
     ORDER BY minute ASC
 ");
@@ -69,7 +69,7 @@ $blockedTimelineRes = $mysqli->query("
                FLOOR(UNIX_TIMESTAMP(event_time) / 30) -- 30-second dedup window
            )) AS cnt
     FROM blocked_events
-    WHERE event_time >= NOW() - INTERVAL 10 MINUTE
+    WHERE event_time >= DATE_SUB(DATE_SUB(NOW(), INTERVAL MINUTE(NOW()) MINUTE), INTERVAL 10 MINUTE)
     GROUP BY minute
     ORDER BY minute ASC
 ");
