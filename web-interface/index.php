@@ -493,7 +493,7 @@ $systemTimeline = [
     <!-- System Resources Chart -->
     <div class="bg-white rounded-2xl shadow p-6 mt-6">
       <h2 class="text-xl font-semibold mb-4">System Resources (Last 60 seconds)</h2>
-      <canvas id="systemChart" style="width: 100%; height: 300px;"></canvas>
+      <canvas id="systemChart" class="w-full h-64"></canvas>
       
       <!-- Detailed System Information Grid -->
       <div class="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -797,36 +797,54 @@ class SystemResourcesChart {
     this.data = {
       cpu: [],
       memory: [],
-      disk: [],
       network: []
     };
     this.maxPoints = 30; // 60 seconds at 2-second intervals
     this.colors = {
       cpu: '#3b82f6',
       memory: '#10b981',
-      disk: '#f59e0b',
       network: '#8b5cf6'
     };
     this.labels = {
       cpu: 'CPU',
       memory: 'Memory',
-      disk: 'Disk',
       network: 'Network'
     };
 
     this.resize();
-    window.addEventListener('resize', () => this.resize());
+    // Debounced resize handler to prevent excessive redraws
+    let resizeTimeout;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => this.resize(), 100);
+    });
   }
 
   resize() {
     const rect = this.canvas.getBoundingClientRect();
-    this.canvas.width = rect.width * window.devicePixelRatio;
-    this.canvas.height = rect.height * window.devicePixelRatio;
+    const newWidth = rect.width;
+    const newHeight = rect.height;
+
+    // Only resize if dimensions actually changed
+    if (newWidth === this.width && newHeight === this.height) {
+      return;
+    }
+
+    // Reset canvas scaling
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    // Set canvas size for high DPI displays
+    this.canvas.width = newWidth * window.devicePixelRatio;
+    this.canvas.height = newHeight * window.devicePixelRatio;
+
+    // Scale context for crisp rendering
     this.ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
-    this.canvas.style.width = rect.width + 'px';
-    this.canvas.style.height = rect.height + 'px';
-    this.width = rect.width;
-    this.height = rect.height;
+
+    // Update stored dimensions
+    this.width = newWidth;
+    this.height = newHeight;
+
+    // Redraw with new dimensions
     this.draw();
   }
 
@@ -834,14 +852,12 @@ class SystemResourcesChart {
     // Add new data point to the right
     this.data.cpu.push(metrics.cpu);
     this.data.memory.push(metrics.memory);
-    this.data.disk.push(metrics.disk);
     this.data.network.push(metrics.network);
 
     // Keep only the last maxPoints
     if (this.data.cpu.length > this.maxPoints) {
       this.data.cpu.shift();
       this.data.memory.shift();
-      this.data.disk.shift();
       this.data.network.shift();
     }
 
@@ -931,12 +947,6 @@ class SystemResourcesChart {
 
       legendX += 80;
     });
-
-    // Title
-    this.ctx.fillStyle = '#111827';
-    this.ctx.font = '14px Arial';
-    this.ctx.textAlign = 'center';
-    this.ctx.fillText('System Resources (Last 60 seconds)', this.width / 2, 15);
   }
 }
 
@@ -1159,7 +1169,6 @@ async function updateChartsRealtime() {
       systemResourcesChart.addDataPoint({
         cpu: data.system_metrics.cpu,
         memory: data.system_metrics.memory,
-        disk: data.system_metrics.disk,
         network: data.system_metrics.network
       });
     }
