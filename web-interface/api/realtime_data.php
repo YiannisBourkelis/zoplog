@@ -89,8 +89,8 @@ function getSystemMetrics() {
             $parts = preg_split('/\s+/', trim($line));
             if (count($parts) >= 14) {
                 $device = $parts[2];
-                // Look for main disk devices (sda, nvme0n1, etc.) - exclude partitions and loop devices
-                if (preg_match('/^(sda|sdb|sdc|nvme\d+n\d+|vda|hda)$/', $device)) {
+                // Look for main disk devices (sda, nvme0n1, mmcblk, etc.) - exclude partitions and loop devices
+                if (preg_match('/^(sda|sdb|sdc|nvme\d+n\d+|vda|hda|mmcblk\d+)$/', $device)) {
                     $metrics['disk_read_ops'] += (int)$parts[3];
                     $metrics['disk_write_ops'] += (int)$parts[7];
                     $metrics['disk_read_mb'] += round(((int)$parts[5] * 512) / (1024*1024), 1);
