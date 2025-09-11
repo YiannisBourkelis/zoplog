@@ -16,7 +16,7 @@ fi
 
 # React on common events
 case "$STATUS" in
-    up|dhcp4-change|connectivity-change) ;;
+    up|dhcp4-change|connectivity-change|reapply) ;;
     *) exit 0 ;;
 esac
 
@@ -38,10 +38,21 @@ nmcli connection modify "$CONN_NAME" \
     ipv6.never-default no \
     ipv6.dns ""
 
-# Reapply to pick up any changes without flapping the link
-nmcli device reapply "$INTERFACE" || nmcli connection up "$CONN_NAME"
+# Force DNS configuration refresh by briefly disconnecting and reconnecting
+logger "zoplog-dispatcher: refreshing DNS configuration for $INTERFACE"
+nmcli device reapply "$INTERFACE" 2>/dev/null || nmcli connection up "$CONN_NAME" 2>/dev/null || true
+
+# Wait a moment for DNS to be applied
+sleep 2
+
+# Force resolv.conf regeneration
+systemctl restart systemd-resolved 2>/dev/null || true
 
 # Log current default route and DNS servers for troubleshooting
 GW=$(ip route show default | awk '/default/ {print $3, $5}' | head -n1)
 DNS=$(nmcli -t -f IP4.DNS,IP6.DNS connection show "$CONN_NAME" 2>/dev/null | tr '\n' ' ')
 logger "zoplog-dispatcher: $INTERFACE ($CONN_NAME) applied DHCP DNS/GW; default=$GW dns=[$DNS]"
+
+# Verify DNS configuration was updated
+CURRENT_DNS=$(grep '^nameserver' /etc/resolv.conf | head -3 | tr '\n' ' ')
+logger "zoplog-dispatcher: current resolv.conf DNS: [$CURRENT_DNS]"
