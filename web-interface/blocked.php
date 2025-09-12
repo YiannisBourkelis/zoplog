@@ -41,10 +41,22 @@
         </select>
       </label>
 
-      <input id="filter-ip" type="text" placeholder="Filter by IP" class="border rounded px-2 py-1">
-      <input id="filter-direction" type="text" placeholder="Direction (IN/OUT/FWD)" class="border rounded px-2 py-1">
-      <input id="filter-proto" type="text" placeholder="Protocol (TCP/UDP/ICMP)" class="border rounded px-2 py-1">
-      <input id="filter-iface" type="text" placeholder="Iface (IN/OUT)" class="border rounded px-2 py-1">
+      <div class="flex items-center gap-2">
+        <input id="filter-ip" type="text" placeholder="Filter by IP" class="border rounded px-2 py-1">
+        <button id="clear-ip" class="text-gray-400 hover:text-gray-600 hidden">✕</button>
+      </div>
+      <div class="flex items-center gap-2">
+        <input id="filter-direction" type="text" placeholder="Direction (IN/OUT/FWD)" class="border rounded px-2 py-1">
+        <button id="clear-direction" class="text-gray-400 hover:text-gray-600 hidden">✕</button>
+      </div>
+      <div class="flex items-center gap-2">
+        <input id="filter-proto" type="text" placeholder="Protocol (TCP/UDP/ICMP)" class="border rounded px-2 py-1">
+        <button id="clear-proto" class="text-gray-400 hover:text-gray-600 hidden">✕</button>
+      </div>
+      <div class="flex items-center gap-2">
+        <input id="filter-iface" type="text" placeholder="Iface (IN/OUT)" class="border rounded px-2 py-1">
+        <button id="clear-iface" class="text-gray-400 hover:text-gray-600 hidden">✕</button>
+      </div>
 
       <button id="apply-filters" class="bg-blue-500 text-white px-3 py-1 rounded">Apply Filters</button>
     </div>
@@ -198,6 +210,28 @@ document.getElementById("apply-filters").addEventListener("click", () => {
   filters.iface = document.getElementById("filter-iface").value;
   latestTimestamp = null;
   fetchBlocked(true);
+});
+
+// Enter key support for filter inputs
+['filter-ip', 'filter-direction', 'filter-proto', 'filter-iface'].forEach(id => {
+  const input = document.getElementById(id);
+  const clearBtn = document.getElementById('clear-' + id.split('-')[1]);
+  
+  input.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+      document.getElementById("apply-filters").click();
+    }
+  });
+  
+  input.addEventListener('input', () => {
+    clearBtn.classList.toggle('hidden', !input.value);
+  });
+  
+  clearBtn.addEventListener('click', () => {
+    input.value = '';
+    clearBtn.classList.add('hidden');
+    document.getElementById("apply-filters").click();
+  });
 });
 
 // Banner click → jump to top

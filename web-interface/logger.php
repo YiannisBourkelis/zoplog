@@ -41,9 +41,18 @@
         </select>
       </label>
 
-      <input id="filter-ip" type="text" placeholder="Filter by IP" class="border rounded px-2 py-1">
-      <input id="filter-mac" type="text" placeholder="Filter by MAC" class="border rounded px-2 py-1">
-      <input id="filter-hostname" type="text" placeholder="Filter by Hostname" class="border rounded px-2 py-1">
+      <div class="flex items-center gap-2">
+        <input id="filter-ip" type="text" placeholder="Filter by IP" class="border rounded px-2 py-1">
+        <button id="clear-ip" class="text-gray-400 hover:text-gray-600 hidden">✕</button>
+      </div>
+      <div class="flex items-center gap-2">
+        <input id="filter-mac" type="text" placeholder="Filter by MAC" class="border rounded px-2 py-1">
+        <button id="clear-mac" class="text-gray-400 hover:text-gray-600 hidden">✕</button>
+      </div>
+      <div class="flex items-center gap-2">
+        <input id="filter-hostname" type="text" placeholder="Filter by Hostname" class="border rounded px-2 py-1">
+        <button id="clear-hostname" class="text-gray-400 hover:text-gray-600 hidden">✕</button>
+      </div>
 
       <select id="filter-method" class="border rounded px-2 py-1">
         <option value="">Any Method</option>
@@ -232,6 +241,28 @@ document.getElementById("apply-filters").addEventListener("click", () => {
   filters.type = document.getElementById("filter-type").value;
   latestTimestamp = null;
   fetchLogs(true);
+});
+
+// Enter key support for filter inputs
+['filter-ip', 'filter-mac', 'filter-hostname'].forEach(id => {
+  const input = document.getElementById(id);
+  const clearBtn = document.getElementById('clear-' + id.split('-')[1]);
+  
+  input.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+      document.getElementById("apply-filters").click();
+    }
+  });
+  
+  input.addEventListener('input', () => {
+    clearBtn.classList.toggle('hidden', !input.value);
+  });
+  
+  clearBtn.addEventListener('click', () => {
+    input.value = '';
+    clearBtn.classList.add('hidden');
+    document.getElementById("apply-filters").click();
+  });
 });
 
 // Banner click → jump to top
