@@ -36,7 +36,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // Fetch blocklist row
-$stmt = $mysqli->prepare('SELECT id, url, description, category, active, created_at, updated_at FROM blocklists WHERE id = ?');
+$stmt = $mysqli->prepare('SELECT id, url, description, category, active, created_at, updated_at, type FROM blocklists WHERE id = ?');
 $stmt->bind_param('i', $blocklistId);
 $stmt->execute();
 $blRes = $stmt->get_result();
@@ -47,6 +47,9 @@ if (!$blocklist) {
   echo 'Blocklist not found';
   exit;
 }
+
+// Check if this blocklist allows domain deletion (system or manual types)
+$canDeleteDomains = in_array($blocklist['type'] ?? 'url', ['system', 'manual']);
 
 // Search + pagination
 $search = isset($_GET['search']) ? trim($_GET['search']) : '';
@@ -105,6 +108,21 @@ $stmt->close();
           <h1 class="text-2xl font-bold">Blocklist</h1>
           <div class="text-sm text-gray-600 break-all">URL: <?= htmlspecialchars($blocklist['url']) ?></div>
           <div class="text-xs text-gray-500">Created: <?= htmlspecialchars($blocklist['created_at']) ?> | Updated: <?= htmlspecialchars($blocklist['updated_at']) ?></div>
+          <div class="text-xs mt-1">
+            <span class="px-2 py-1 rounded text-xs 
+              <?php 
+                if ($blocklist['type'] === 'system') echo 'bg-purple-100 text-purple-700';
+                elseif ($blocklist['type'] === 'manual') echo 'bg-blue-100 text-blue-700';
+                else echo 'bg-gray-100 text-gray-700';
+              ?>">
+              <?= htmlspecialchars(ucfirst($blocklist['type'])) ?> Blocklist
+            </span>
+            <?php if ($canDeleteDomains): ?>
+              <span class="text-green-600 text-xs ml-2">✓ Domain deletion enabled</span>
+            <?php else: ?>
+              <span class="text-orange-600 text-xs ml-2">⚠ Domain deletion disabled (URL-based)</span>
+            <?php endif; ?>
+          </div>
         </div>
       </div>
       <a href="blocklists.php" class="text-blue-600 hover:underline">← Back to Blocklists</a>
@@ -147,16 +165,30 @@ $stmt->close();
         <thead class="bg-gray-200">
           <tr>
             <th class="px-4 py-2">Domain Name</th>
+            <?php if ($canDeleteDomains): ?>
+              <th class="px-4 py-2">Actions</th>
+            <?php endif; ?>
           </tr>
         </thead>
         <tbody>
           <?php foreach ($domainsPage as $domain): ?>
             <tr>
               <td class="px-4 py-2"><?= htmlspecialchars($domain) ?></td>
+              <?php if ($canDeleteDomains): ?>
+                <td class="px-4 py-2">
+                  <button type="button" class="delete-domain-btn bg-red-500 text-white px-2 py-1 rounded text-xs hover:bg-red-600" 
+                          data-domain="<?= htmlspecialchars($domain) ?>" 
+                          data-blocklist-id="<?= (int)$blocklistId ?>">
+                    Delete
+                  </button>
+                </td>
+              <?php endif; ?>
             </tr>
           <?php endforeach; ?>
           <?php if (empty($domainsPage)): ?>
-            <tr><td class="px-4 py-6 text-gray-500">No domains found.</td></tr>
+            <tr>
+              <td class="px-4 py-6 text-gray-500" colspan="<?= $canDeleteDomains ? '2' : '1' ?>">No domains found.</td>
+            </tr>
           <?php endif; ?>
         </tbody>
       </table>
@@ -172,4 +204,50 @@ $stmt->close();
         <a href="?list=<?= (int)$blocklistId ?>&page=<?= $page+1 ?>&search=<?= urlencode($search) ?>" class="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300">Next &gt;</a>
       <?php endif; ?>
     </div>
+  </div>
+
+  <script>
+    // Delete domain functionality
+    document.addEventListener('click', async (e) => {
+      if (e.target.classList.contains('delete-domain-btn')) {
+        e.preventDefault();
+        const domain = e.target.dataset.domain;
+        const blocklistId = e.target.dataset.blocklistId;
+        
+        if (!domain || !blocklistId) return;
+        
+        if (!confirm(`Delete domain "${domain}" from this blocklist?`)) {
+          return;
+        }
+        
+        try {
+          const formData = new FormData();
+          formData.append('domain', domain);
+          formData.append('blocklist_id', blocklistId);
+          
+          const res = await fetch('delete_domain.php', {
+            method: 'POST',
+            body: formData
+          });
+          
+          const data = await res.json();
+          
+          if (data.status === 'ok') {
+            // Remove the row from the table
+            e.target.closest('tr').remove();
+            alert(data.message);
+            
+            // Reload the page to update counts and pagination
+            window.location.reload();
+          } else {
+            alert(`Failed to delete domain: ${data.message}`);
+          }
+        } catch (error) {
+          alert('Network error. Please try again.');
+        }
+      }
+    });
+  </script>
+</body>
+</html>
   </div>

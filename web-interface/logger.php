@@ -90,6 +90,7 @@
             <th class="px-4 py-2">Method</th>
             <th class="px-4 py-2">Host</th>
             <th class="px-4 py-2">Path</th>
+            <th class="px-4 py-2">Actions</th>
           </tr>
         </thead>
         <tbody id="logs-body"></tbody>
@@ -115,6 +116,8 @@ let filters = { ip: "", mac: "", hostname: "", method: "", type: "" };
 let userAtTop = true;
 
 function renderRow(row) {
+  const hostname = row.hostname || "";
+  const blockButton = hostname ? `<button class="block-hostname-btn bg-red-500 text-white px-2 py-1 rounded text-xs hover:bg-red-600" data-hostname="${hostname}">Block</button>` : "";
   return `
     <td class="px-4 py-2">${row.packet_timestamp}</td>
     <td class="px-4 py-2">${row.src_ip}:${row.src_port}</td>
@@ -125,6 +128,7 @@ function renderRow(row) {
     <td class="px-4 py-2">${row.method}</td>
     <td class="px-4 py-2">${row.hostname || ""}</td>
     <td class="px-4 py-2">${row.path || ""}</td>
+    <td class="px-4 py-2">${blockButton}</td>
   `;
 }
 
@@ -269,6 +273,44 @@ document.getElementById("apply-filters").addEventListener("click", () => {
 document.getElementById("new-logs-banner").addEventListener("click", () => {
   window.scrollTo({ top: 0, behavior: "smooth" });
   document.getElementById("new-logs-banner").classList.add("hidden");
+});
+
+// Block hostname functionality
+document.addEventListener('click', async (e) => {
+  if (e.target.classList.contains('block-hostname-btn')) {
+    e.preventDefault();
+    const hostname = e.target.dataset.hostname;
+    
+    if (!hostname) return;
+    
+    if (!confirm(`Block hostname "${hostname}"? This will add it to the system blocklist.`)) {
+      return;
+    }
+    
+    try {
+      const formData = new FormData();
+      formData.append('hostname', hostname);
+      
+      const res = await fetch('block_hostname.php', {
+        method: 'POST',
+        body: formData
+      });
+      
+      const data = await res.json();
+      
+      if (data.status === 'ok') {
+        alert(`Hostname "${hostname}" has been blocked successfully!`);
+        e.target.textContent = 'Blocked';
+        e.target.disabled = true;
+        e.target.classList.remove('bg-red-500', 'hover:bg-red-600');
+        e.target.classList.add('bg-gray-500');
+      } else {
+        alert(`Failed to block hostname: ${data.message}`);
+      }
+    } catch (error) {
+      alert('Network error. Please try again.');
+    }
+  }
 });
 
 // Initial load

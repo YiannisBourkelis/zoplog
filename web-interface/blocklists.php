@@ -3,10 +3,10 @@
 require_once __DIR__ . '/zoplog_config.php';
 
 // Fetch blocklists with domain counts
-$res = $mysqli->query("SELECT id, url, description, category, active, created_at, updated_at,
+$res = $mysqli->query("SELECT id, url, description, category, active, created_at, updated_at, type,
   (SELECT COUNT(*) FROM blocklist_domains bd WHERE bd.blocklist_id = blocklists.id) AS domains_count
   FROM blocklists
-  ORDER BY created_at DESC");
+  ORDER BY CASE WHEN type = 'system' THEN 0 ELSE 1 END, created_at DESC");
 $blocklists = [];
 if ($res) {
     while ($row = $res->fetch_assoc()) { $blocklists[] = $row; }
@@ -85,6 +85,7 @@ if ($res) {
           <div class="flex items-center justify-between mb-2 relative z-20">
             <div class="flex items-center gap-2">
               <span class="text-xs px-2 py-1 rounded <?= htmlspecialchars($b['category']) === 'social' ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700' ?>"><?= htmlspecialchars(ucfirst($b['category'])) ?></span>
+              <span class="text-xs px-2 py-1 rounded <?= $b['type'] === 'system' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700' ?>"><?= htmlspecialchars(ucfirst($b['type'])) ?></span>
               <span class="text-xs px-2 py-1 rounded bg-gray-100 text-gray-700"><?= (int)($b['domains_count'] ?? 0) ?> domains</span>
             </div>
             <div class="flex items-center gap-2">
@@ -100,7 +101,9 @@ if ($res) {
                 </button>
                 <div class="menu-popup fixed w-24 bg-white border rounded shadow-lg hidden z-50" data-id="<?= (int)$b['id'] ?>" style="top:0;left:0;">
                   <button class="edit-btn w-full text-left px-3 py-2 text-sm hover:bg-gray-100" data-id="<?= (int)$b['id'] ?>">Edit</button>
-                  <button class="delete-btn w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50" data-id="<?= (int)$b['id'] ?>">Delete</button>
+                  <?php if ($b['type'] !== 'system'): ?>
+                    <button class="delete-btn w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50" data-id="<?= (int)$b['id'] ?>">Delete</button>
+                  <?php endif; ?>
                 </div>
               </div>
             </div>
