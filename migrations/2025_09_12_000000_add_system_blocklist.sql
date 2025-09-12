@@ -14,7 +14,7 @@ DEALLOCATE PREPARE stmt;
 
 -- Create system blocklist for user-added blocked domains (only if it doesn't exist)
 INSERT IGNORE INTO `blocklists` (`url`, `description`, `category`, `active`, `created_at`, `updated_at`, `type`) VALUES
-('', 'System blocklist for user-blocked domains', 'other', 'active', NOW(), NOW(), 'system');
+('', 'System blocklist for user-blocked domains', 'other', 'inactive', NOW(), NOW(), 'system');
 
 -- Update existing blocklists to have type 'url' (only if they don't have a type set)
 UPDATE `blocklists` SET `type` = 'url' WHERE `type` = '' OR `type` IS NULL;

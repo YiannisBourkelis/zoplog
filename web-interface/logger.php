@@ -117,7 +117,7 @@ let userAtTop = true;
 
 function renderRow(row) {
   const hostname = row.hostname || "";
-  const blockButton = hostname ? `<button class="block-hostname-btn bg-red-500 text-white px-2 py-1 rounded text-xs hover:bg-red-600" data-hostname="${hostname}">Block</button>` : "";
+  const blockButton = hostname ? `<button class="block-hostname-btn bg-red-500 text-white px-2 py-1 rounded text-xs hover:bg-red-600" data-hostname="${hostname}" data-action="block">Block</button>` : "";
   return `
     <td class="px-4 py-2">${row.packet_timestamp}</td>
     <td class="px-4 py-2">${row.src_ip}:${row.src_port}</td>
@@ -199,6 +199,11 @@ async function fetchLogs(reset=false, prepend=false) {
     console.error("Fetch failed:", e);
   } finally {
     document.getElementById("loading").classList.add("hidden");
+    
+    // Update block button states after loading new data
+    if (!prepend) {
+      updateBlockButtonStates();
+    }
   }
 }
 
@@ -280,16 +285,22 @@ document.addEventListener('click', async (e) => {
   if (e.target.classList.contains('block-hostname-btn')) {
     e.preventDefault();
     const hostname = e.target.dataset.hostname;
+    const action = e.target.dataset.action; // 'block' or 'unblock'
     
-    if (!hostname) return;
+    if (!hostname || !action) return;
     
-    if (!confirm(`Block hostname "${hostname}"? This will add it to the system blocklist.`)) {
+    const confirmMessage = action === 'block' 
+      ? `Block hostname "${hostname}"? This will add it to the system blocklist.`
+      : `Unblock hostname "${hostname}"? This will remove it from the system blocklist.`;
+    
+    if (!confirm(confirmMessage)) {
       return;
     }
     
     try {
       const formData = new FormData();
       formData.append('hostname', hostname);
+      formData.append('action', action);
       
       const res = await fetch('block_hostname.php', {
         method: 'POST',
@@ -299,19 +310,63 @@ document.addEventListener('click', async (e) => {
       const data = await res.json();
       
       if (data.status === 'ok') {
-        alert(`Hostname "${hostname}" has been blocked successfully!`);
-        e.target.textContent = 'Blocked';
-        e.target.disabled = true;
-        e.target.classList.remove('bg-red-500', 'hover:bg-red-600');
-        e.target.classList.add('bg-gray-500');
+        if (data.action === 'blocked') {
+          alert(data.message || `Hostname "${hostname}" has been blocked successfully!`);
+          e.target.textContent = 'Undo Block';
+          e.target.dataset.action = 'unblock';
+          e.target.classList.remove('bg-red-500', 'hover:bg-red-600');
+          e.target.classList.add('bg-orange-500', 'hover:bg-orange-600');
+        } else if (data.action === 'unblocked') {
+          alert(data.message || `Hostname "${hostname}" has been unblocked successfully!`);
+          e.target.textContent = 'Block';
+          e.target.dataset.action = 'block';
+          e.target.classList.remove('bg-orange-500', 'hover:bg-orange-600');
+          e.target.classList.add('bg-red-500', 'hover:bg-red-600');
+        }
       } else {
-        alert(`Failed to block hostname: ${data.message}`);
+        alert(`Failed to ${action} hostname: ${data.message}`);
       }
     } catch (error) {
       alert('Network error. Please try again.');
     }
   }
 });
+
+// Function to check and update block button states for visible hostnames
+async function updateBlockButtonStates() {
+  const buttons = document.querySelectorAll('.block-hostname-btn[data-action="block"]');
+  const hostnames = Array.from(buttons).map(btn => btn.dataset.hostname).filter((v, i, a) => a.indexOf(v) === i);
+  
+  if (hostnames.length === 0) return;
+  
+  try {
+    // Check which hostnames are already blocked
+    const formData = new FormData();
+    formData.append('hostnames', JSON.stringify(hostnames));
+    
+    const res = await fetch('check_blocked_hostnames.php', {
+      method: 'POST',
+      body: formData
+    });
+    
+    const data = await res.json();
+    
+    if (data.status === 'ok' && data.blocked) {
+      // Update buttons for blocked hostnames
+      buttons.forEach(button => {
+        const hostname = button.dataset.hostname;
+        if (data.blocked.includes(hostname)) {
+          button.textContent = 'Undo Block';
+          button.dataset.action = 'unblock';
+          button.classList.remove('bg-red-500', 'hover:bg-red-600');
+          button.classList.add('bg-orange-500', 'hover:bg-orange-600');
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Failed to check blocked hostnames:', error);
+  }
+}
 
 // Initial load
 fetchLogs(true);
