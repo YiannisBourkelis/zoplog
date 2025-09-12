@@ -599,28 +599,52 @@ Cmnd_Alias ZOPLOG_SCRIPTS = \
 Cmnd_Alias ZOPLOG_SYSTEMCTL = \
     /bin/systemctl restart zoplog-logger, \
     /bin/systemctl restart zoplog-blockreader, \
+    /bin/systemctl restart zoplog-dns-dispatcher, \
+    /bin/systemctl restart zoplog-log-cleanup.timer, \
     /bin/systemctl start zoplog-logger, \
     /bin/systemctl start zoplog-blockreader, \
+    /bin/systemctl start zoplog-dns-dispatcher, \
+    /bin/systemctl start zoplog-log-cleanup.timer, \
     /bin/systemctl stop zoplog-logger, \
     /bin/systemctl stop zoplog-blockreader, \
+    /bin/systemctl stop zoplog-dns-dispatcher, \
+    /bin/systemctl stop zoplog-log-cleanup.timer, \
     /bin/systemctl status zoplog-logger, \
     /bin/systemctl status zoplog-blockreader, \
+    /bin/systemctl status zoplog-dns-dispatcher, \
+    /bin/systemctl status zoplog-log-cleanup.timer, \
     /bin/systemctl is-active zoplog-logger, \
     /bin/systemctl is-active zoplog-blockreader, \
+    /bin/systemctl is-active zoplog-dns-dispatcher, \
+    /bin/systemctl is-active zoplog-log-cleanup.timer, \
     /bin/systemctl is-enabled zoplog-logger, \
     /bin/systemctl is-enabled zoplog-blockreader, \
+    /bin/systemctl is-enabled zoplog-dns-dispatcher, \
+    /bin/systemctl is-enabled zoplog-log-cleanup.timer, \
     /usr/bin/systemctl restart zoplog-logger, \
     /usr/bin/systemctl restart zoplog-blockreader, \
+    /usr/bin/systemctl restart zoplog-dns-dispatcher, \
+    /usr/bin/systemctl restart zoplog-log-cleanup.timer, \
     /usr/bin/systemctl start zoplog-logger, \
     /usr/bin/systemctl start zoplog-blockreader, \
+    /usr/bin/systemctl start zoplog-dns-dispatcher, \
+    /usr/bin/systemctl start zoplog-log-cleanup.timer, \
     /usr/bin/systemctl stop zoplog-logger, \
     /usr/bin/systemctl stop zoplog-blockreader, \
+    /usr/bin/systemctl stop zoplog-dns-dispatcher, \
+    /usr/bin/systemctl stop zoplog-log-cleanup.timer, \
     /usr/bin/systemctl status zoplog-logger, \
     /usr/bin/systemctl status zoplog-blockreader, \
+    /usr/bin/systemctl status zoplog-dns-dispatcher, \
+    /usr/bin/systemctl status zoplog-log-cleanup.timer, \
     /usr/bin/systemctl is-active zoplog-logger, \
     /usr/bin/systemctl is-active zoplog-blockreader, \
+    /usr/bin/systemctl is-active zoplog-dns-dispatcher, \
+    /usr/bin/systemctl is-active zoplog-log-cleanup.timer, \
     /usr/bin/systemctl is-enabled zoplog-logger, \
-    /usr/bin/systemctl is-enabled zoplog-blockreader
+    /usr/bin/systemctl is-enabled zoplog-blockreader, \
+    /usr/bin/systemctl is-enabled zoplog-dns-dispatcher, \
+    /usr/bin/systemctl is-enabled zoplog-log-cleanup.timer
 
 ## Removed ZOPLOG_CONFIG_FIX alias; inline binaries in user spec to avoid alias/args issues
 
@@ -966,19 +990,20 @@ TimeoutStartSec=3600
 WantedBy=multi-user.target
 EOF
 
-    # ZopLog log cleanup timer
-    cat > /etc/systemd/system/zoplog-log-cleanup.timer <<EOF
+    # ZopLog DNS dispatcher service for boot-time DNS configuration
+    cat > /etc/systemd/system/zoplog-dns-dispatcher.service <<EOF
 [Unit]
-Description=Run ZopLog disk space cleanup hourly
-Requires=zoplog-log-cleanup.service
+Description=ZopLog DNS Dispatcher
+After=network.target
+Wants=network.target
 
-[Timer]
-OnCalendar=hourly
-Persistent=true
-RandomizedDelaySec=300
+[Service]
+Type=oneshot
+ExecStart=/etc/NetworkManager/dispatcher.d/zoplog-dns-dispatcher
+RemainAfterExit=yes
 
 [Install]
-WantedBy=timers.target
+WantedBy=multi-user.target
 EOF
 
     # Enable and start services
@@ -987,6 +1012,7 @@ EOF
     systemctl enable zoplog-blockreader.service
     systemctl enable zoplog-log-cleanup.service
     systemctl enable zoplog-log-cleanup.timer
+    systemctl enable zoplog-dns-dispatcher.service
     
     # Start services non-blocking to avoid hangs during install; they are also enabled for boot
     log_info "Starting ZopLog services (non-blocking)..."
