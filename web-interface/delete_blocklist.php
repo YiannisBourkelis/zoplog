@@ -34,7 +34,7 @@ try {
     $warning = null;
     require_once 'zoplog_config.php';
     $scripts_path = get_zoplog_scripts_path();
-    $cmd = 'sudo -n ' . escapeshellarg($scripts_path . '/zoplog-firewall-remove') . ' ' . escapeshellarg((string)$id);
+    $cmd = $scripts_path . '/zoplog-firewall-remove ' . escapeshellarg((string)$id);
     $descriptors = [1 => ['pipe','w'], 2 => ['pipe','w']];
     $proc = @proc_open($cmd, $descriptors, $pipes);
     if (is_resource($proc)) {

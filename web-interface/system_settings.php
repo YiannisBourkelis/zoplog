@@ -80,18 +80,18 @@ function saveSystemSettings($settings) {
     $settingsFile = '/etc/zoplog/zoplog.conf';
     $settingsDir = dirname($settingsFile);
     
-    // Ensure directory and file exist with correct permissions; escalate via sudo if needed
+    // Ensure directory and file exist with correct permissions; zoplog user has permissions
     if (!is_dir($settingsDir) || !is_writable($settingsDir)) {
-        // Attempt to create/fix directory via sudo
-        @shell_exec('sudo /bin/mkdir -p ' . escapeshellarg($settingsDir) . ' 2>/dev/null');
-        @shell_exec('sudo /bin/chown root:www-data ' . escapeshellarg($settingsDir) . ' 2>/dev/null');
-        @shell_exec('sudo /bin/chmod 775 ' . escapeshellarg($settingsDir) . ' 2>/dev/null');
+        // Attempt to create/fix directory via direct execution
+        @shell_exec('/bin/mkdir -p ' . escapeshellarg($settingsDir) . ' 2>/dev/null');
+        @shell_exec('/bin/chown root:zoplog ' . escapeshellarg($settingsDir) . ' 2>/dev/null');
+        @shell_exec('/bin/chmod 775 ' . escapeshellarg($settingsDir) . ' 2>/dev/null');
     }
     if (!file_exists($settingsFile) || !is_writable($settingsFile)) {
         // Ensure the file exists and is writable by group
-        @shell_exec('sudo /usr/bin/touch ' . escapeshellarg($settingsFile) . ' 2>/dev/null');
-        @shell_exec('sudo /bin/chown root:www-data ' . escapeshellarg($settingsFile) . ' 2>/dev/null');
-        @shell_exec('sudo /bin/chmod 660 ' . escapeshellarg($settingsFile) . ' 2>/dev/null');
+        @shell_exec('/usr/bin/touch ' . escapeshellarg($settingsFile) . ' 2>/dev/null');
+        @shell_exec('/bin/chown root:zoplog ' . escapeshellarg($settingsFile) . ' 2>/dev/null');
+        @shell_exec('/bin/chmod 660 ' . escapeshellarg($settingsFile) . ' 2>/dev/null');
     }
     
     // If still not writable, bail out
@@ -246,9 +246,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $allSuccess = true;
             
             foreach ($services as $service) {
-        // Use explicit paths to match sudoers rules
-        $output = shell_exec('sudo /bin/systemctl restart ' . escapeshellarg($service) . ' 2>&1');
-        $status = shell_exec('sudo /bin/systemctl is-active ' . escapeshellarg($service) . ' 2>&1');
+        // Use explicit paths to match sudoers rules for zoplog user
+        $output = shell_exec('/bin/systemctl restart ' . escapeshellarg($service) . ' 2>&1');
+        $status = shell_exec('/bin/systemctl is-active ' . escapeshellarg($service) . ' 2>&1');
                 
                 if ($output === null) {
                     $results[] = "$service: Restart command executed";
@@ -266,7 +266,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             sleep(2);
             $message .= "\n\nFinal Status Check:";
             foreach ($services as $service) {
-                $status = shell_exec('sudo /bin/systemctl is-active ' . escapeshellarg($service) . ' 2>/dev/null');
+                $status = shell_exec('/bin/systemctl is-active ' . escapeshellarg($service) . ' 2>/dev/null');
                 $message .= "\n$service: " . trim($status ?: 'unknown');
             }
         } elseif ($_POST['action'] === 'check_services') {
@@ -274,14 +274,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $results = [];
             
             foreach ($services as $service) {
-                $status = shell_exec('sudo /bin/systemctl is-active ' . escapeshellarg($service) . ' 2>/dev/null');
-                $enabled = shell_exec('sudo /bin/systemctl is-enabled ' . escapeshellarg($service) . ' 2>/dev/null');
+                $status = shell_exec('/bin/systemctl is-active ' . escapeshellarg($service) . ' 2>/dev/null');
+                $enabled = shell_exec('/bin/systemctl is-enabled ' . escapeshellarg($service) . ' 2>/dev/null');
                 $results[] = "$service:";
                 $results[] = "  Status: " . trim($status ?: 'unknown');
                 $results[] = "  Enabled: " . trim($enabled ?: 'unknown');
                 
-                // Get brief service status instead of journalctl to match sudoers
-                $svcStatus = shell_exec('sudo /bin/systemctl status ' . escapeshellarg($service) . ' 2>/dev/null');
+                // Get brief service status instead of journalctl to match sudoers for zoplog user
+                $svcStatus = shell_exec('/bin/systemctl status ' . escapeshellarg($service) . ' 2>/dev/null');
                 if ($svcStatus) {
                     $results[] = "  Status output: " . trim($svcStatus);
                 }
@@ -293,9 +293,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($_POST['action'] === 'fix_config_permissions') {
             // Fix configuration file permissions
             $commands = [
-        'sudo /usr/bin/touch /etc/zoplog/zoplog.conf',
-        'sudo /bin/chown root:www-data /etc/zoplog/zoplog.conf',
-        'sudo /bin/chmod 660 /etc/zoplog/zoplog.conf'
+        '/usr/bin/touch /etc/zoplog/zoplog.conf',
+        '/bin/chown root:zoplog /etc/zoplog/zoplog.conf',
+        '/bin/chmod 660 /etc/zoplog/zoplog.conf'
             ];
             
             $outputs = [];
@@ -327,24 +327,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($_POST['action'] === 'reboot_device') {
             // Reboot using explicit whitelisted paths from sudoers
             if (file_exists('/bin/systemctl')) {
-                shell_exec('sudo -b /bin/systemctl reboot >/dev/null 2>&1 &');
+                shell_exec('/bin/systemctl reboot >/dev/null 2>&1 &');
             } elseif (file_exists('/sbin/shutdown')) {
-                shell_exec('sudo -b /sbin/shutdown -r now >/dev/null 2>&1 &');
+                shell_exec('/sbin/shutdown -r now >/dev/null 2>&1 &');
             } elseif (file_exists('/sbin/reboot')) {
-                shell_exec('sudo -b /sbin/reboot >/dev/null 2>&1 &');
+                shell_exec('/sbin/reboot >/dev/null 2>&1 &');
             }
             $message = "Device reboot initiated. The web interface will go offline shortly.";
             $messageType = 'warning';
         } elseif ($_POST['action'] === 'poweroff_device') {
             // Power off using explicit whitelisted paths from sudoers
             if (file_exists('/bin/systemctl')) {
-                shell_exec('sudo -b /bin/systemctl poweroff >/dev/null 2>&1 &');
+                shell_exec('/bin/systemctl poweroff >/dev/null 2>&1 &');
             } elseif (file_exists('/sbin/shutdown')) {
-                shell_exec('sudo -b /sbin/shutdown -h now >/dev/null 2>&1 &');
+                shell_exec('/sbin/shutdown -h now >/dev/null 2>&1 &');
             } elseif (file_exists('/sbin/poweroff')) {
-                shell_exec('sudo -b /sbin/poweroff >/dev/null 2>&1 &');
+                shell_exec('/sbin/poweroff >/dev/null 2>&1 &');
             } elseif (file_exists('/sbin/halt')) {
-                shell_exec('sudo -b /sbin/halt -p >/dev/null 2>&1 &');
+                shell_exec('/sbin/halt -p >/dev/null 2>&1 &');
             }
             $message = "Device power-off initiated. You will need to power it on manually.";
             $messageType = 'warning';
@@ -568,7 +568,7 @@ $availableInterfaces = getAvailableInterfaces();
                 
                 <p class="text-sm text-gray-500">
                     If you get "Could not save settings file" errors, try the "Fix Config Permissions" button first.<br>
-                    If service restart fails, you may need to configure sudoers permissions for the web server.
+                    If service restart fails, you may need to configure sudoers permissions for the zoplog user.
                 </p>
             </div>
         </div>

@@ -442,7 +442,7 @@ level = INFO
 EOF
 
     # Set secure permissions
-    chown root:www-data /etc/zoplog/database.conf
+    chown root:zoplog /etc/zoplog/database.conf
     chmod 640 /etc/zoplog/database.conf
     
     # Create centralized system settings configuration with proper monitoring interface
@@ -478,11 +478,10 @@ last_updated = $(date '+%Y-%m-%d %H:%M:%S')
 EOF
 
     # Set secure permissions for system config
-    chown root:www-data /etc/zoplog/zoplog.conf
+    chown root:zoplog /etc/zoplog/zoplog.conf
     chmod 660 /etc/zoplog/zoplog.conf
     
-    # Allow zoplog user to read the config by adding to www-data group
-    usermod -a -G www-data "$ZOPLOG_USER" 2>/dev/null || true
+    # Allow zoplog user to read the config (no group change needed since it's already zoplog)
     
     # Save database credentials for backup/reference
     cat > "$ZOPLOG_HOME/.db_credentials" <<EOF
@@ -578,7 +577,7 @@ setup_web_interface() {
     # The centralized configuration is already handled by setup_centralized_config()
     
     # Set proper permissions
-    chown -R www-data:www-data "$WEB_ROOT"
+    chown -R zoplog:zoplog "$WEB_ROOT"
     chmod -R 755 "$WEB_ROOT"
     
     log_success "Web interface setup completed"
@@ -661,8 +660,7 @@ Cmnd_Alias ZOPLOG_POWER = \
 
 # Permissions
 zoplog  ALL=(root) NOPASSWD: ZOPLOG_SCRIPTS, ZOPLOG_POWER
-www-data ALL=(root) NOPASSWD: ZOPLOG_SCRIPTS, ZOPLOG_POWER
-www-data ALL=(ALL)  NOPASSWD: ZOPLOG_SYSTEMCTL, /usr/bin/touch, /bin/mkdir, /bin/chown, /bin/chmod
+zoplog ALL=(ALL)  NOPASSWD: ZOPLOG_SYSTEMCTL, /usr/bin/touch, /bin/mkdir, /bin/chown, /bin/chmod, /usr/bin/tee /etc/resolv.conf
 EOF
     
     # Set proper permissions for sudoers file
@@ -708,6 +706,9 @@ server {
     
     server_name _;
     
+    # Run as zoplog user for better isolation
+    user zoplog;
+    
     location / {
         try_files \$uri \$uri/ =404;
     }
@@ -739,6 +740,44 @@ EOF
     
     log_success "Nginx configured successfully"
 }
+
+setup_php_fpm() {
+    log_info "Configuring PHP-FPM to run as zoplog user..."
+    
+    # Detect PHP-FPM configuration directory
+    if [ -n "${PHP_VERSION:-}" ]; then
+        PHP_FPM_CONF_DIR="/etc/php/${PHP_VERSION}/fpm"
+        PHP_FPM_POOL_CONF="${PHP_FPM_CONF_DIR}/pool.d/www.conf"
+    else
+        # Fallback detection
+        PHP_FPM_CONF_DIR=$(find /etc/php/ -name "fpm" -type d | head -n1)
+        if [ -z "$PHP_FPM_CONF_DIR" ]; then
+            PHP_FPM_CONF_DIR="/etc/php/7.4/fpm"  # Common fallback
+        fi
+        PHP_FPM_POOL_CONF="${PHP_FPM_CONF_DIR}/pool.d/www.conf"
+    fi
+    
+    if [ ! -f "$PHP_FPM_POOL_CONF" ]; then
+        log_warning "PHP-FPM pool configuration not found at $PHP_FPM_POOL_CONF"
+        return 0
+    fi
+    
+    # Backup original configuration
+    cp "$PHP_FPM_POOL_CONF" "${PHP_FPM_POOL_CONF}.backup"
+    
+    # Update PHP-FPM to run as zoplog user
+    sed -i 's/^user = www-data/user = zoplog/' "$PHP_FPM_POOL_CONF"
+    sed -i 's/^group = www-data/group = zoplog/' "$PHP_FPM_POOL_CONF"
+    sed -i 's/^listen.owner = www-data/listen.owner = zoplog/' "$PHP_FPM_POOL_CONF"
+    sed -i 's/^listen.group = www-data/listen.group = zoplog/' "$PHP_FPM_POOL_CONF"
+    
+    # Reload PHP-FPM
+    systemctl reload php${PHP_VERSION:-7.4}-fpm || systemctl reload php-fpm
+    
+    log_success "PHP-FPM configured to run as zoplog user"
+}
+
+setup_nginx() {
 
 setup_scripts() {
     log_info "Setting up ZopLog scripts..."
@@ -990,6 +1029,21 @@ TimeoutStartSec=3600
 WantedBy=multi-user.target
 EOF
 
+    # ZopLog log cleanup timer
+    cat > /etc/systemd/system/zoplog-log-cleanup.timer <<EOF
+[Unit]
+Description=Run ZopLog disk space cleanup hourly
+Requires=zoplog-log-cleanup.service
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
+EOF
+
     # ZopLog DNS dispatcher service for boot-time DNS configuration
     cat > /etc/systemd/system/zoplog-dns-dispatcher.service <<EOF
 [Unit]
@@ -999,6 +1053,8 @@ Wants=network.target
 
 [Service]
 Type=oneshot
+User=$ZOPLOG_USER
+Group=$ZOPLOG_USER
 ExecStart=/etc/NetworkManager/dispatcher.d/zoplog-dns-dispatcher
 RemainAfterExit=yes
 
@@ -1235,6 +1291,7 @@ main() {
     setup_web_interface
     setup_sudoers
     setup_nginx
+    setup_php_fpm
     setup_scripts
     create_database_schema
     setup_transparent_proxy

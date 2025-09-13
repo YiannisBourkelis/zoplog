@@ -11,6 +11,8 @@ Wants=network.target
 
 [Service]
 Type=oneshot
+User=zoplog
+Group=zoplog
 ExecStart=/etc/NetworkManager/dispatcher.d/zoplog-dns-dispatcher
 RemainAfterExit=yes
 
