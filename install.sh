@@ -507,10 +507,22 @@ setup_python_environment() {
     cd "$ZOPLOG_HOME/zoplog/python-logger"
     
     # Ensure Python development headers are available for package compilation
-    apt-get install -y python3-dev build-essential || log_warning "Could not install development packages"
+    log_info "Installing development packages for Python compilation..."
+    apt-get install -y python3-dev build-essential pkg-config libsystemd-dev || {
+        log_error "Failed to install development packages - Python compilation may fail"
+        return 1
+    }
+    
+    # Verify systemd development libraries are available
+    if ! pkg-config --exists libsystemd; then
+        log_warning "libsystemd development libraries not found - systemd-python may not install"
+    fi
     
     # Create virtual environment
     sudo -u "$ZOPLOG_USER" python3 -m venv venv
+    
+    # Ensure proper ownership of virtual environment
+    chown -R "$ZOPLOG_USER:$ZOPLOG_USER" venv
     
     # Create config.py from config.example.py for the logger to work
     log_info "Creating config.py from template..."
@@ -542,22 +554,42 @@ setup_python_environment() {
     fi
     
     # Install systemd-python separately (may not be available on all systems)
-    if sudo -u "$ZOPLOG_USER" ./venv/bin/pip install systemd-python; then
-        log_success "systemd-python installed via pip"
+    log_info "Installing systemd-python..."
+    if pkg-config --exists libsystemd; then
+        # Remove any existing systemd symlink that might conflict
+        sudo -u "$ZOPLOG_USER" rm -f ./venv/lib/python*/site-packages/systemd 2>/dev/null || true
+        
+        if sudo -u "$ZOPLOG_USER" ./venv/bin/pip install systemd-python; then
+            log_success "systemd-python installed via pip"
+        else
+            log_warning "systemd-python pip installation failed, trying system package..."
+            if apt-get install -y python3-systemd; then
+                log_success "python3-systemd installed via apt"
+                # Link system systemd module to venv
+                if [ -d "/usr/lib/python3/dist-packages/systemd" ]; then
+                    ln -sf /usr/lib/python3/dist-packages/systemd ./venv/lib/python*/site-packages/ 2>/dev/null || {
+                        log_warning "Failed to link systemd module to venv"
+                    }
+                else
+                    log_warning "systemd module not found in system packages"
+                fi
+            else
+                log_warning "systemd-python not available via apt either"
+            fi
+        fi
     else
-        log_warning "systemd-python not available via pip, trying system package..."
+        log_warning "libsystemd not available, skipping systemd-python installation"
+        # Try system package as fallback
         if apt-get install -y python3-systemd; then
-            log_success "python3-systemd installed via apt"
+            log_success "python3-systemd installed via apt (fallback)"
             # Link system systemd module to venv
             if [ -d "/usr/lib/python3/dist-packages/systemd" ]; then
                 ln -sf /usr/lib/python3/dist-packages/systemd ./venv/lib/python*/site-packages/ 2>/dev/null || {
                     log_warning "Failed to link systemd module to venv"
                 }
-            else
-                log_warning "systemd module not found in system packages"
             fi
         else
-            log_warning "systemd-python not available via apt either"
+            log_warning "systemd-python not available - some features may not work"
         fi
     fi
     
