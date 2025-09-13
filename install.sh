@@ -706,9 +706,6 @@ server {
     
     server_name _;
     
-    # Run as zoplog user for better isolation
-    user zoplog;
-    
     location / {
         try_files \$uri \$uri/ =404;
     }
@@ -728,6 +725,13 @@ server {
     }
 }
 EOF
+    
+    # Configure nginx to run as www-data (default) but isolate via PHP-FPM
+    log_info "Keeping nginx as www-data, using PHP-FPM for user isolation..."
+    
+    # Ensure web directory is accessible by both nginx (www-data) and PHP-FPM (zoplog)
+    chown -R zoplog:www-data "$WEB_ROOT"
+    chmod -R 750 "$WEB_ROOT"
     
     # Enable site
     rm -f /etc/nginx/sites-enabled/default
@@ -765,11 +769,30 @@ setup_php_fpm() {
     # Backup original configuration
     cp "$PHP_FPM_POOL_CONF" "${PHP_FPM_POOL_CONF}.backup"
     
-    # Update PHP-FPM to run as zoplog user
+    # Update PHP-FPM to run as zoplog user but keep socket accessible to nginx
     sed -i 's/^user = www-data/user = zoplog/' "$PHP_FPM_POOL_CONF"
     sed -i 's/^group = www-data/group = zoplog/' "$PHP_FPM_POOL_CONF"
-    sed -i 's/^listen.owner = www-data/listen.owner = zoplog/' "$PHP_FPM_POOL_CONF"
-    sed -i 's/^listen.group = www-data/listen.group = zoplog/' "$PHP_FPM_POOL_CONF"
+    
+    # Keep socket ownership as www-data so nginx can access it
+    # If these lines don't exist, add them
+    if ! grep -q "^listen.owner" "$PHP_FPM_POOL_CONF"; then
+        echo "listen.owner = www-data" >> "$PHP_FPM_POOL_CONF"
+    else
+        sed -i 's/^listen.owner = .*/listen.owner = www-data/' "$PHP_FPM_POOL_CONF"
+    fi
+    
+    if ! grep -q "^listen.group" "$PHP_FPM_POOL_CONF"; then
+        echo "listen.group = www-data" >> "$PHP_FPM_POOL_CONF"
+    else
+        sed -i 's/^listen.group = .*/listen.group = www-data/' "$PHP_FPM_POOL_CONF"
+    fi
+    
+    # Set socket permissions so both users can access
+    if ! grep -q "^listen.mode" "$PHP_FPM_POOL_CONF"; then
+        echo "listen.mode = 0660" >> "$PHP_FPM_POOL_CONF"
+    else
+        sed -i 's/^listen.mode = .*/listen.mode = 0660/' "$PHP_FPM_POOL_CONF"
+    fi
     
     # Reload PHP-FPM
     systemctl reload "php${PHP_VERSION:-7.4}-fpm" || systemctl reload php-fpm
@@ -790,8 +813,8 @@ setup_scripts() {
     # Make scripts executable
     chmod +x "$SCRIPTS_DIR/zoplog-"*
     
-    # Set setuid bit on firewall scripts for proper privilege escalation
-    chmod u+s "$SCRIPTS_DIR/zoplog-firewall-"*
+    # Note: Scripts use sudo for privilege escalation instead of setuid
+    # This is more secure and allows fine-grained control via sudoers
     
     log_success "Scripts configured successfully"
     cat > /etc/systemd/system/zoplog-nftables.service <<EOF
