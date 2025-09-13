@@ -436,8 +436,8 @@ def ipset_add_ip(blocklist_id: int, ip: str, blocklist_domain_id: int | None = N
     try:
         # Use scripts from relative path instead of /usr/local/sbin/
         script_path = os.path.join(SCRIPTS_DIR, "zoplog-firewall-ipset-add")
-        # Don't use sudo since the script has setuid bit
-        cmd = [script_path, str(blocklist_id), ip]
+        # Use sudo -n for elevated privileges (configured in sudoers)
+        cmd = ["/usr/bin/sudo", "-n", script_path, str(blocklist_id), ip]
         debug_print(f"DEBUG: Executing command: {' '.join(cmd)}", settings=settings)
         
         result = subprocess.run(
