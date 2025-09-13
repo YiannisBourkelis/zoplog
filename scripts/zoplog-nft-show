@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Show ZopLog nftables rules
+# Usage: zoplog-nft-show
+
+export PATH="/usr/sbin:/sbin:/usr/bin:/bin:${PATH:-}"
+
+NFT_BIN="/usr/sbin/nft"
+if [[ ! -x "$NFT_BIN" ]]; then
+  NFT_BIN="$(command -v nft || true)"
+fi
+if [[ -z "${NFT_BIN:-}" ]]; then
+  echo "Error: nft binary not found in PATH" >&2
+  exit 127
+fi
+
+TABLE="zoplog"
+
+# List the zoplog table or report if it doesn't exist
+if "$NFT_BIN" list table inet "$TABLE" 2>/dev/null; then
+  exit 0
+else
+  echo "No ZopLog firewall table found (table 'inet zoplog' does not exist)."
+  exit 0
+fi

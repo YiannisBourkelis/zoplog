@@ -324,6 +324,120 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $message = "Permission fix completed, but file may still not be writable:\n\n" . implode("\n", $outputs);
                 $messageType = 'warning';
             }
+        } elseif ($_POST['action'] === 'clean_firewall_rules') {
+            // Clean all ZopLog firewall rules and recreate for all blocklists
+            require_once 'zoplog_config.php';
+            $scripts_path = get_zoplog_scripts_path();
+            
+            try {
+                // First, clean all existing rules
+                $cleanOutput = shell_exec('/usr/bin/sudo -n ' . escapeshellarg($scripts_path . '/zoplog-nft-clean') . ' 2>&1');
+                
+                $messages = [];
+                $messageType = 'success';
+                
+                if ($cleanOutput === null) {
+                    $messages[] = "Firewall cleanup completed.";
+                } elseif (strpos($cleanOutput, 'sudo:') !== false) {
+                    $message = "Permission denied: sudo configuration may need updating for firewall commands.\n\nOutput: " . trim($cleanOutput);
+                    $messageType = 'error';
+                } else {
+                    $messages[] = "Cleanup: " . trim($cleanOutput);
+                }
+                
+                // If cleanup succeeded, recreate rules for all blocklists
+                if ($messageType !== 'error') {
+                    // Use the same database connection method as other parts of the web interface
+                    $db_config = load_zoplog_database_config();
+                    $mysqli = new mysqli($db_config['host'], $db_config['user'], $db_config['password'], $db_config['database']);
+                    
+                    if ($mysqli->connect_error) {
+                        $messages[] = "Database error: " . $mysqli->connect_error;
+                        $messageType = 'warning';
+                    } else {
+                        // Get all blocklists (active and inactive)
+                        $result = $mysqli->query("SELECT id, url, description, active FROM blocklists ORDER BY id");
+                        $recreated = [];
+                        $errors = [];
+                        
+                        if ($result && $result->num_rows > 0) {
+                            while ($row = $result->fetch_assoc()) {
+                                $blocklistId = $row['id'];
+                                $url = $row['url'];
+                                $description = $row['description'];
+                                $active = $row['active'];
+                                
+                                // Use description if available, otherwise use a truncated URL for display
+                                $displayName = !empty($description) ? $description : (strlen($url) > 50 ? substr($url, 0, 47) . '...' : $url);
+                                
+                                // Apply firewall rules for this blocklist
+                                $applyCmd = '/usr/bin/sudo -n ' . escapeshellarg($scripts_path . '/zoplog-firewall-apply') . ' ' . escapeshellarg($blocklistId) . ' 2>&1';
+                                $applyOutput = shell_exec($applyCmd);
+                                
+                                // Check if the command actually failed or just produced informational output
+                                $isError = false;
+                                if ($applyOutput !== null && trim($applyOutput) !== '') {
+                                    $output = trim($applyOutput);
+                                    // These are normal success messages, not errors
+                                    $successPatterns = [
+                                        'Applying firewall rules to internet-facing interface:',
+                                        'Firewall rules applied successfully',
+                                        'Rules created for blocklist'
+                                    ];
+                                    
+                                    $isError = true;
+                                    foreach ($successPatterns as $pattern) {
+                                        if (strpos($output, $pattern) !== false) {
+                                            $isError = false;
+                                            break;
+                                        }
+                                    }
+                                    
+                                    // Also check for specific error indicators
+                                    $errorPatterns = [
+                                        'Error:',
+                                        'Permission denied',
+                                        'Operation not permitted',
+                                        'command not found',
+                                        'No such file'
+                                    ];
+                                    
+                                    foreach ($errorPatterns as $pattern) {
+                                        if (stripos($output, $pattern) !== false) {
+                                            $isError = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                                
+                                if (!$isError) {
+                                    $recreated[] = "ID $blocklistId ($displayName) - " . ($active === 'active' ? 'Active' : 'Inactive');
+                                } else {
+                                    $errors[] = "ID $blocklistId ($displayName): " . trim($applyOutput);
+                                }
+                            }
+                            
+                            if (!empty($recreated)) {
+                                $messages[] = "Recreated rules for " . count($recreated) . " blocklist(s):\n" . implode("\n", $recreated);
+                            }
+                            if (!empty($errors)) {
+                                $messages[] = "Errors recreating some rules:\n" . implode("\n", $errors);
+                                $messageType = 'warning';
+                            }
+                        } else {
+                            $messages[] = "No blocklists found in database to recreate rules for.";
+                        }
+                        
+                        $mysqli->close();
+                    }
+                }
+                
+                $message = implode("\n\n", $messages);
+                
+            } catch (Exception $e) {
+                $message = "Error during firewall cleanup and recreation: " . $e->getMessage();
+                $messageType = 'error';
+            }
         } elseif ($_POST['action'] === 'reboot_device') {
             // Reboot using explicit whitelisted paths from sudoers
             if (file_exists('/bin/systemctl')) {
@@ -348,6 +462,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $message = "Device power-off initiated. You will need to power it on manually.";
             $messageType = 'warning';
+        } elseif ($_POST['action'] === 'get_firewall_status') {
+            // Handle AJAX request for firewall status
+            try {
+                require_once 'zoplog_config.php';
+                $scripts_path = get_zoplog_scripts_path();
+                
+                $output = shell_exec('/usr/bin/sudo -n ' . escapeshellarg($scripts_path . '/zoplog-nft-show') . ' 2>&1');
+                
+                if ($output === null || trim($output) === '') {
+                    $output = 'No output from firewall status command.';
+                } elseif (strpos($output, 'sudo:') !== false) {
+                    $output = 'Permission denied: sudo configuration may need updating for firewall commands.';
+                }
+                
+                echo "FIREWALL_OUTPUT_START\n" . trim($output) . "\nFIREWALL_OUTPUT_END";
+                exit;
+            } catch (Exception $e) {
+                echo "FIREWALL_OUTPUT_START\nError retrieving firewall status: " . $e->getMessage() . "\nFIREWALL_OUTPUT_END";
+                exit;
+            }
         }
     }
 }
@@ -573,6 +707,53 @@ $availableInterfaces = getAvailableInterfaces();
             </div>
         </div>
 
+        <!-- Firewall Rules Management -->
+        <div class="bg-white rounded-lg shadow-md p-6 mt-6">
+            <h2 class="text-xl font-semibold mb-4 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                </svg>
+                Firewall Rules Management
+            </h2>
+            
+            <div class="mb-4">
+                <p class="text-gray-600 mb-4">
+                    Clean up all ZopLog-created firewall rules and recreate them for all blocklists in the database. This will rebuild the nftables configuration from scratch.
+                </p>
+                
+                <div class="flex flex-wrap gap-4">
+                    <form method="POST" onsubmit="return confirm('Are you sure you want to clean and recreate all ZopLog firewall rules? This will rebuild all nftables rules from the database.');">
+                        <input type="hidden" name="action" value="clean_firewall_rules">
+                        <button type="submit" 
+                                class="bg-orange-600 text-white px-6 py-3 rounded-lg hover:bg-orange-700 transition duration-200 flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                            </svg>
+                            Clean & Recreate All Rules
+                        </button>
+                    </form>
+
+                    <button type="button" onclick="showFirewallStatus()" 
+                            class="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition duration-200 flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        Show Current Rules
+                    </button>
+                </div>
+                
+                <div id="firewall-status" class="mt-4 hidden bg-gray-100 rounded-lg p-4">
+                    <h4 class="font-medium mb-2">Current ZopLog Firewall Rules:</h4>
+                    <pre id="firewall-output" class="text-sm text-gray-700 whitespace-pre-wrap max-h-64 overflow-y-auto"></pre>
+                </div>
+            </div>
+            
+            <p class="text-sm text-gray-500">
+                <strong>Note:</strong> This operation will clean all existing ZopLog firewall rules and recreate them for all blocklists in the database (both active and inactive). 
+                Blocklist data remains intact. This is useful for rebuilding the firewall configuration or fixing rule inconsistencies.
+            </p>
+        </div>
+
         <!-- Power Controls (after Service Management) -->
         <div class="bg-white rounded-lg shadow-md p-6 mt-6">
             <h2 class="text-xl font-semibold mb-4 flex items-center">
@@ -637,5 +818,38 @@ $availableInterfaces = getAvailableInterfaces();
             </div>
         </div>
     </div>
+
+    <script>
+    function showFirewallStatus() {
+        const statusDiv = document.getElementById('firewall-status');
+        const outputPre = document.getElementById('firewall-output');
+        
+        // Show loading
+        statusDiv.classList.remove('hidden');
+        outputPre.textContent = 'Loading firewall rules...';
+        
+        // Fetch current firewall rules
+        fetch('', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: 'action=get_firewall_status'
+        })
+        .then(response => response.text())
+        .then(data => {
+            // Extract just the firewall output from the response
+            const match = data.match(/FIREWALL_OUTPUT_START\n(.*?)\nFIREWALL_OUTPUT_END/s);
+            if (match) {
+                outputPre.textContent = match[1] || 'No ZopLog firewall rules found.';
+            } else {
+                outputPre.textContent = 'Could not retrieve firewall status.';
+            }
+        })
+        .catch(error => {
+            outputPre.textContent = 'Error fetching firewall status: ' + error.message;
+        });
+    }
+    </script>
 </body>
 </html>
