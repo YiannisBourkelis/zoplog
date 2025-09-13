@@ -86,7 +86,7 @@ ask_user_interfaces() {
         return 0
     fi
     read -rp "Select local-network (LAN) interface index (different from WAN): " LAN_IDX
-    if ! [[ $LAN_IDX =~ ^[0-9]+$ ]] || (( LAN_IDX < 0 || LAN_IDX >= ${#ALL_IFACES[@]} )) || [[ $LAN_IDX == $WAN_IDX ]]; then
+    if ! [[ $LAN_IDX =~ ^[0-9]+$ ]] || (( LAN_IDX < 0 || LAN_IDX >= ${#ALL_IFACES[@]} )) || [[ $LAN_IDX == "$WAN_IDX" ]]; then
         log_warning "Invalid or same selection; will treat as single-interface (no bridge)."
         OVERRIDE_INTERNET_IF="${ALL_IFACES[$WAN_IDX]}"
         OVERRIDE_INTERNAL_IF=""
@@ -132,7 +132,7 @@ detect_interfaces() {
         fi
         # Confirmation pause only in interactive terminal
         if [ -t 0 ]; then
-            read -p "Press Enter to continue or Ctrl+C to abort" _
+            read -r -p "Press Enter to continue or Ctrl+C to abort" _
         fi
         return 0
     fi
@@ -188,7 +188,7 @@ detect_interfaces() {
     # Auto-continue after 5 seconds if running non-interactively
     if [ -t 0 ]; then
         # Interactive terminal - ask for confirmation
-        read -p "Press Enter to continue or Ctrl+C to abort and configure manually"
+        read -r -p "Press Enter to continue or Ctrl+C to abort and configure manually"
     else
         # Non-interactive (piped from curl) - auto-continue
         log_info "Auto-continuing in 3 seconds... (Ctrl+C to abort)"
@@ -772,12 +772,10 @@ setup_php_fpm() {
     sed -i 's/^listen.group = www-data/listen.group = zoplog/' "$PHP_FPM_POOL_CONF"
     
     # Reload PHP-FPM
-    systemctl reload php${PHP_VERSION:-7.4}-fpm || systemctl reload php-fpm
+    systemctl reload "php${PHP_VERSION:-7.4}-fpm" || systemctl reload php-fpm
     
     log_success "PHP-FPM configured to run as zoplog user"
 }
-
-setup_nginx() {
 
 setup_scripts() {
     log_info "Setting up ZopLog scripts..."
