@@ -515,13 +515,19 @@ def log_http_request(packet, settings: dict):
 
     # Whitelist overrides blacklist: if host is whitelisted, do nothing
     if host and is_host_whitelisted(host, settings):
+        debug_print(f"DEBUG: HTTP host {host} is whitelisted, skipping blocking", settings=settings)
         return
 
     # If host matches any active blocklist and is not whitelisted, add destination IP to corresponding set(s) and record it
     try:
         if host and dst_ip:
-            for bl_id, bd_id in find_matching_blocklist_domains(host, settings):
-                ipset_add_ip(bl_id, dst_ip, bd_id, settings)
+            matching_domains = find_matching_blocklist_domains(host, settings)
+            if matching_domains:
+                debug_print(f"DEBUG: HTTP host {host} matches {len(matching_domains)} blocklist(s), blocking IP {dst_ip}", settings=settings)
+                for bl_id, bd_id in matching_domains:
+                    ipset_add_ip(bl_id, dst_ip, bd_id, settings)
+            else:
+                debug_print(f"DEBUG: HTTP host {host} does not match any active blocklists", settings=settings)
     except Exception as e:
         print(f"error during ipset add for HTTP host={host} ip={dst_ip}: {e}")
 
@@ -651,13 +657,19 @@ def log_https_request(packet, settings: dict, hostname: str | None = None):
 
     # Whitelist overrides blacklist: if host is whitelisted, do nothing
     if hostname and is_host_whitelisted(hostname, settings):
+        debug_print(f"DEBUG: HTTPS hostname {hostname} is whitelisted, skipping blocking", settings=settings)
         return
 
     # If SNI matches any active blocklist and is not whitelisted, add destination IP to corresponding set(s) and record it
     try:
         if hostname and dst_ip:
-            for bl_id, bd_id in find_matching_blocklist_domains(hostname, settings):
-                ipset_add_ip(bl_id, dst_ip, bd_id, settings)
+            matching_domains = find_matching_blocklist_domains(hostname, settings)
+            if matching_domains:
+                debug_print(f"DEBUG: HTTPS hostname {hostname} matches {len(matching_domains)} blocklist(s), blocking IP {dst_ip}", settings=settings)
+                for bl_id, bd_id in matching_domains:
+                    ipset_add_ip(bl_id, dst_ip, bd_id, settings)
+            else:
+                debug_print(f"DEBUG: HTTPS hostname {hostname} does not match any active blocklists", settings=settings)
     except Exception as e:
         print(f"error during ipset add for HTTPS host={hostname} ip={dst_ip}: {e}")
 
@@ -681,12 +693,18 @@ def log_https_quic_request(packet, settings: dict, hostname: str | None = None):
 
     # Whitelist overrides blacklist: if host is whitelisted, do nothing
     if hostname and is_host_whitelisted(hostname, settings):
+        debug_print(f"DEBUG: QUIC hostname {hostname} is whitelisted, skipping blocking", settings=settings)
         return
 
     try:
         if hostname and dst_ip:
-            for bl_id, bd_id in find_matching_blocklist_domains(hostname, settings):
-                ipset_add_ip(bl_id, dst_ip, bd_id, settings)
+            matching_domains = find_matching_blocklist_domains(hostname, settings)
+            if matching_domains:
+                debug_print(f"DEBUG: QUIC hostname {hostname} matches {len(matching_domains)} blocklist(s), blocking IP {dst_ip}", settings=settings)
+                for bl_id, bd_id in matching_domains:
+                    ipset_add_ip(bl_id, dst_ip, bd_id, settings)
+            else:
+                debug_print(f"DEBUG: QUIC hostname {hostname} does not match any active blocklists", settings=settings)
     except Exception as e:
         print(f"error during ipset add for HTTPS_QUIC host={hostname} ip={dst_ip}: {e}")
 
@@ -701,6 +719,7 @@ def tcp_packet_handler(packet, settings):
     try:
         # Check for HTTP traffic on any port
         if packet.haslayer(HTTPRequest):
+            debug_print(f"DEBUG: HTTP packet detected", settings=settings)
             log_http_request(packet, settings)
             return
 
@@ -708,6 +727,7 @@ def tcp_packet_handler(packet, settings):
         if settings.get("enable_sni_extraction", True):
             hostname = extract_tls_sni(packet)
             if hostname:
+                debug_print(f"DEBUG: HTTPS packet detected with SNI: {hostname}", settings=settings)
                 log_https_request(packet, settings, hostname)
                 return
 
@@ -719,6 +739,7 @@ def tcp_packet_handler(packet, settings):
                     buf = _flow_buffer_get(key)
                     host2 = parse_sni_from_bytes(buf) if buf else None
                     if host2:
+                        debug_print(f"DEBUG: HTTPS packet detected via reassembly with SNI: {host2}", settings=settings)
                         log_https_request(packet, settings, host2)
                         _flow_buffer_clear(key)
                         return
