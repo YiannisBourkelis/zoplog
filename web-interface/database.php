@@ -73,7 +73,7 @@ function getDatabaseInfo() {
         $activity24h = $result->fetch_assoc();
         $result->free();
 
-        // Get blocked IPs count
+        // Get blocked IPs count (historical total)
         $result = $mysqli->query("SELECT COUNT(*) as blocked_ips_count FROM blocked_ips");
         if (!$result) {
             throw new Exception("Query failed: " . $mysqli->error);
@@ -81,7 +81,7 @@ function getDatabaseInfo() {
         $blockedCount = $result->fetch_assoc();
         $result->free();
 
-        // Get blocklist stats
+        // Get blocklist stats (historical totals)
         $result = $mysqli->query("
             SELECT
                 (SELECT COUNT(*) FROM blocked_ips) as blocklist_ips,

@@ -63,12 +63,13 @@ try {
 
         $blocklistDomainId = $domainRow['id'];
 
-        // Find all IPs associated with this hostname
+        // Find all IPs associated with this hostname in the last 30 days
         $stmt = $mysqli->prepare('
             SELECT DISTINCT ip.ip_address, ip.id as ip_id
             FROM ip_addresses ip
             JOIN hostnames h ON h.ip_id = ip.id
-            WHERE h.hostname = ?
+            JOIN packet_logs pl ON pl.hostname_id = h.id
+            WHERE h.hostname = ? AND pl.packet_timestamp >= DATE_SUB(NOW(), INTERVAL 30 DAY)
         ');
         $stmt->bind_param('s', $domain);
         $stmt->execute();
@@ -79,40 +80,45 @@ try {
         }
         $stmt->close();
 
-        // For each associated IP, check if it's blocked and remove from firewall
+        // For each associated IP, remove from firewall and update blocked_ips for statistics
         $removedIPs = [];
         foreach ($associatedIPs as $ipData) {
             $ipAddress = $ipData['ip_address'];
             $ipId = $ipData['ip_id'];
 
-            // Check if this IP is blocked for this blocklist domain
-            $stmt = $mysqli->prepare('SELECT id FROM blocked_ips WHERE blocklist_domain_id = ? AND ip_id = ?');
+            // Keep in blocked_ips for statistics but mark as unblocked by updating last_seen
+            // This preserves historical data while indicating the IP is no longer actively blocked
+            $stmt = $mysqli->prepare('UPDATE blocked_ips SET last_seen = NOW() WHERE blocklist_domain_id = ? AND ip_id = ?');
             $stmt->bind_param('ii', $blocklistDomainId, $ipId);
             $stmt->execute();
-            $blockedResult = $stmt->get_result();
+            $stmt->close();
 
-            if ($blockedResult->num_rows > 0) {
-                // Remove from firewall sets
-                $ipFamily = filter_var($ipAddress, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) ? 'v6' : 'v4';
-                $setName = "zoplog-blocklist-{$blocklistId}-{$ipFamily}";
+            // Remove from firewall sets (both IPv4 and IPv6 sets for this blocklist)
+            $ipFamily = filter_var($ipAddress, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) ? 'v6' : 'v4';
+            $setName = "zoplog-blocklist-{$blocklistId}-{$ipFamily}";
 
-                // Execute nft delete command
-                $scriptPath = __DIR__ . '/../scripts/zoplog-nft-del-element';
-                $nftCommand = escapeshellcmd($scriptPath) . ' ' . escapeshellarg($ipFamily) . ' ' . escapeshellarg($setName) . ' ' . escapeshellarg($ipAddress);
-                exec($nftCommand . ' 2>/dev/null', $output, $returnCode);
-
-                if ($returnCode === 0) {
-                    $removedIPs[] = $ipAddress;
-                }
-
-                // Remove from blocked_ips table
-                $stmt->close();
-                $stmt = $mysqli->prepare('DELETE FROM blocked_ips WHERE blocklist_domain_id = ? AND ip_id = ?');
-                $stmt->bind_param('ii', $blocklistDomainId, $ipId);
-                $stmt->execute();
-                $stmt->close();
+            // Execute nft delete command with sudo
+            $scriptPath = __DIR__ . '/../scripts/zoplog-nft-del-element';
+            
+            // Check if development script exists, otherwise use production path
+            if (!file_exists($scriptPath)) {
+                $scriptPath = '/opt/zoplog/zoplog/scripts/zoplog-nft-del-element';
+            }
+            
+            if (file_exists($scriptPath)) {
+                $nftCommand = sprintf('sudo %s %s %s %s 2>/dev/null', 
+                    escapeshellarg($scriptPath), 
+                    escapeshellarg($ipFamily), 
+                    escapeshellarg($setName), 
+                    escapeshellarg($ipAddress)
+                );
+                exec($nftCommand, $output, $returnCode);
             } else {
-                $stmt->close();
+                $returnCode = 1; // Script not found
+            }
+
+            if ($returnCode === 0) {
+                $removedIPs[] = $ipAddress;
             }
         }
 

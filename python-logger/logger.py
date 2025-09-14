@@ -753,7 +753,7 @@ def tcp_packet_handler(packet, settings):
             dst_port = packet[scapy.TCP].dport
             src_port = packet[scapy.TCP].sport
             src_ip, dst_ip = _get_ips(packet)
-            debug_print(f"DEBUG: Non-HTTP/HTTPS TCP packet: {src_ip}:{src_port} -> {dst_ip}:{dst_port}", settings=settings)
+            # debug_print(f"DEBUG: Non-HTTP/HTTPS TCP packet: {src_ip}:{src_port} -> {dst_ip}:{dst_port}", settings=settings)
 
     except Exception as e:
         # Log errors in debug mode only to avoid spam
