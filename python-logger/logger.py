@@ -434,28 +434,46 @@ def ipset_add_ip(blocklist_id: int, ip: str, blocklist_domain_id: int | None = N
     
     # First try to apply firewall change
     try:
-        # Use scripts from relative path instead of /usr/local/sbin/
-        script_path = os.path.join(SCRIPTS_DIR, "zoplog-firewall-ipset-add")
-        # Use sudo -n for elevated privileges (configured in sudoers)
-        cmd = ["/usr/bin/sudo", "-n", script_path, str(blocklist_id), ip]
-        debug_print(f"DEBUG: Executing command: {' '.join(cmd)}", settings=settings)
-        
+        # Resolve script path (prefer installed scripts dir, fallback to production path)
+        candidate_path = os.path.join(SCRIPTS_DIR, "zoplog-firewall-ipset-add")
+        script_path = candidate_path if os.path.exists(candidate_path) else "/opt/zoplog/zoplog/scripts/zoplog-firewall-ipset-add"
+
+        # 1) Try direct execution first (service typically has CAP_NET_ADMIN)
+        direct_cmd = [script_path, str(blocklist_id), ip]
+        debug_print(f"DEBUG: Executing (direct): {' '.join(direct_cmd)}", settings=settings)
         result = subprocess.run(
-            cmd,
+            direct_cmd,
             capture_output=True,
             text=True,
-            timeout=2,
+            timeout=3,
         )
-        
-        debug_print(f"DEBUG: Command completed - returncode={result.returncode}", settings=settings)
+
+        debug_print(f"DEBUG: Direct command completed - returncode={result.returncode}", settings=settings)
         debug_print(f"DEBUG: stdout: {repr(result.stdout)}", settings=settings)
         debug_print(f"DEBUG: stderr: {repr(result.stderr)}", settings=settings)
-        
-        if result.returncode != 0:
-            err = (result.stderr or '').strip()
-            print(f"ERROR: ipset add failed rc={result.returncode} id={blocklist_id} ip={ip} stderr={err}")
+
+        if result.returncode == 0:
+            debug_print(f"SUCCESS: ipset add (direct) completed for id={blocklist_id} ip={ip}", settings=settings)
         else:
-            debug_print(f"SUCCESS: ipset add completed successfully for id={blocklist_id} ip={ip}", settings=settings)
+            # 2) Fall back to sudo -n if direct execution failed (e.g., missing capability)
+            sudo_cmd = ["/usr/bin/sudo", "-n", script_path, str(blocklist_id), ip]
+            debug_print(f"DEBUG: Direct failed (rc={result.returncode}). Falling back to sudo: {' '.join(sudo_cmd)}", settings=settings)
+            result2 = subprocess.run(
+                sudo_cmd,
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+
+            debug_print(f"DEBUG: Sudo command completed - returncode={result2.returncode}", settings=settings)
+            debug_print(f"DEBUG: sudo stdout: {repr(result2.stdout)}", settings=settings)
+            debug_print(f"DEBUG: sudo stderr: {repr(result2.stderr)}", settings=settings)
+
+            if result2.returncode != 0:
+                err = (result2.stderr or '').strip()
+                print(f"ERROR: ipset add failed (sudo) rc={result2.returncode} id={blocklist_id} ip={ip} stderr={err}")
+            else:
+                debug_print(f"SUCCESS: ipset add (sudo) completed for id={blocklist_id} ip={ip}", settings=settings)
             
     except subprocess.TimeoutExpired:
         print(f"ERROR: ipset add timed out id={blocklist_id} ip={ip}")
