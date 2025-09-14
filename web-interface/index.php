@@ -6,6 +6,9 @@ ini_set('display_errors', 1);
 // Use centralized DB config/connection
 require_once __DIR__ . '/zoplog_config.php';
 
+// Add ZopLog signature header for device identification
+header('X-ZopLog-Server: ZopLog Server');
+
 // Total requests (allowed + blocked normalized)
 $allowedRes = $mysqli->query("SELECT COUNT(*) AS cnt FROM packet_logs");
 $allowedRequests = $allowedRes->fetch_assoc()["cnt"];
