@@ -246,7 +246,8 @@ install_dependencies() {
             php8.4-curl \
             php8.4-mbstring \
             php8.4-xml \
-            php8.4-zip 2>/dev/null; then
+            php8.4-zip \
+            php8.4-opcache 2>/dev/null; then
             PHP_VERSION="8.4"
             log_info "Installed PHP 8.4 from Ondrej's repository"
         else
@@ -260,7 +261,8 @@ install_dependencies() {
                 php-curl \
                 php-mbstring \
                 php-xml \
-                php-zip
+                php-zip \
+                php-opcache
             PHP_VERSION=$(php -v | head -n1 | cut -d' ' -f2 | cut -d'.' -f1,2)
         fi
     else
@@ -274,13 +276,71 @@ install_dependencies() {
             php-curl \
             php-mbstring \
             php-xml \
-            php-zip
+            php-zip \
+            php-opcache
         PHP_VERSION=$(php -v | head -n1 | cut -d' ' -f2 | cut -d'.' -f1,2)
     fi
     
     log_info "PHP version: $PHP_VERSION"
     
+    # Configure PHP opcache for better performance
+    configure_php_opcache
+    
     log_success "Dependencies installed successfully"
+}
+
+configure_php_opcache() {
+    log_info "Configuring PHP opcache for optimal performance..."
+    
+    # Detect PHP configuration directory
+    if [ -n "${PHP_VERSION:-}" ]; then
+        PHP_CONF_DIR="/etc/php/${PHP_VERSION}"
+        PHP_INI="${PHP_CONF_DIR}/fpm/php.ini"
+        PHP_CLI_INI="${PHP_CONF_DIR}/cli/php.ini"
+    else
+        # Fallback detection
+        PHP_CONF_DIR=$(find /etc/php/ -name "fpm" -type d | head -n1 | xargs dirname)
+        if [ -z "$PHP_CONF_DIR" ]; then
+            PHP_CONF_DIR="/etc/php/7.4"  # Common fallback
+        fi
+        PHP_INI="${PHP_CONF_DIR}/fpm/php.ini"
+        PHP_CLI_INI="${PHP_CONF_DIR}/cli/php.ini"
+    fi
+    
+    # Configure opcache for FPM
+    if [ -f "$PHP_INI" ]; then
+        log_info "Configuring opcache in $PHP_INI"
+        
+        # Enable opcache
+        sed -i 's/^;*\s*opcache.enable\s*=.*/opcache.enable=1/' "$PHP_INI"
+        
+        # Enable opcache for CLI (optional, but good for consistency)
+        if [ -f "$PHP_CLI_INI" ]; then
+            sed -i 's/^;*\s*opcache.enable_cli\s*=.*/opcache.enable_cli=1/' "$PHP_CLI_INI"
+        fi
+        
+        # Set optimal opcache settings
+        cat >> "$PHP_INI" << 'EOF'
+
+; ZopLog optimized opcache settings
+opcache.memory_consumption=256
+opcache.max_accelerated_files=7963
+opcache.revalidate_freq=0
+opcache.validate_timestamps=1
+opcache.save_comments=1
+opcache.enable_file_override=1
+opcache.error_log=/var/log/php/opcache.log
+opcache.log_verbosity_level=1
+EOF
+        
+        # Create opcache log directory if it doesn't exist
+        mkdir -p /var/log/php
+        chown www-data:www-data /var/log/php
+        
+        log_success "PHP opcache configured successfully"
+    else
+        log_warning "PHP configuration file not found at $PHP_INI"
+    fi
 }
 
 create_zoplog_user() {
