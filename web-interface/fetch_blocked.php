@@ -55,10 +55,22 @@ if ($since) {
     $types .= "ii";
 }
 
+// Build enriched query (schema now guarantees blocklists.type exists)
 $sql = "
-SELECT be.event_time, be.direction, be.src_port, be.dst_port, be.proto, be.iface_in, be.iface_out, be.message,
-             src_ip.ip_address AS src_ip, dst_ip.ip_address AS dst_ip,
-             h.hostname AS hostname
+SELECT
+    be.event_time,
+    be.direction,
+    be.src_port,
+    be.dst_port,
+    be.proto,
+    be.iface_in,
+    be.iface_out,
+    be.message,
+    src_ip.ip_address AS src_ip,
+    dst_ip.ip_address AS dst_ip,
+    h.hostname AS hostname,
+    COALESCE(bc.cnt_url, 0) AS cnt_url_blocklists,
+    COALESCE(bc.cnt_manual_system, 0) AS cnt_manual_system_blocklists
 FROM blocked_events be
 LEFT JOIN ip_addresses src_ip ON be.src_ip_id = src_ip.id
 LEFT JOIN ip_addresses dst_ip ON be.dst_ip_id = dst_ip.id
@@ -67,6 +79,14 @@ LEFT JOIN (
     FROM hostnames
     GROUP BY ip_id
 ) h ON h.ip_id = dst_ip.id
+LEFT JOIN (
+    SELECT bd.domain,
+                 SUM(CASE WHEN bl.type = 'url' THEN 1 ELSE 0 END) AS cnt_url,
+                 SUM(CASE WHEN bl.type IN ('manual','system') THEN 1 ELSE 0 END) AS cnt_manual_system
+    FROM blocklist_domains bd
+    JOIN blocklists bl ON bl.id = bd.blocklist_id
+    GROUP BY bd.domain
+) bc ON bc.domain = h.hostname
 $where_sql
 ORDER BY be.event_time $order
 $limit_sql

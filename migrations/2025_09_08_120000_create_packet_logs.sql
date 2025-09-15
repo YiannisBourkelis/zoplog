@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS `packet_logs` (
   CONSTRAINT `packet_logs_ibfk_6` FOREIGN KEY (`accept_language_id`) REFERENCES `accept_languages` (`id`),
   CONSTRAINT `packet_logs_ibfk_7` FOREIGN KEY (`src_mac_id`) REFERENCES `mac_addresses` (`id`),
   CONSTRAINT `packet_logs_ibfk_8` FOREIGN KEY (`dst_mac_id`) REFERENCES `mac_addresses` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 
 -- Blocked events table
 CREATE TABLE IF NOT EXISTS `blocked_events` (

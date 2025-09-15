@@ -75,6 +75,7 @@
             <th class="px-4 py-2">IN Iface</th>
             <th class="px-4 py-2">OUT Iface</th>
             <th class="px-4 py-2">Message</th>
+            <th class="px-4 py-2">Actions</th>
           </tr>
         </thead>
         <tbody id="logs-body"></tbody>
@@ -95,10 +96,35 @@ let latestTimestamp = null;
 let filters = { ip: "", direction: "", proto: "", iface: "" };
 let userAtTop = true;
 
+function renderActionButtons(row) {
+  const host = row.hostname || '';
+  const dstIp = row.dst_ip || '';
+
+  // Only IP known
+  if (!host) {
+    return `<button class="unblock-ip-btn bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600" data-ip="${dstIp}">Unblock IP</button>`;
+  }
+
+  const cntManual = parseInt(row.cnt_manual_system_blocklists || 0);
+  const btns = [];
+  // Always allow add to whitelist for hostnames
+  btns.push(`<button class="add-wl-btn bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600" data-host="${host}">Add to whitelist</button>`);
+  // Allow unblock hostname only if present in manual/system lists
+  if (cntManual > 0) {
+    btns.push(`<button class="unblock-host-btn bg-orange-500 text-white px-3 py-1 rounded hover:bg-orange-600" data-host="${host}">Unblock Hostname</button>`);
+  }
+  // Always provide Unblock IP as a fallback action
+  btns.push(`<button class="unblock-ip-btn bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600" data-ip="${dstIp}" data-host="${host}">Unblock IP</button>`);
+  return btns.join(' ');
+}
+
+// Removed fetchHostnameMeta function as it is no longer needed
+
 function renderRow(row) {
   const src = `${row.src_ip || ''}${row.src_port ? ':'+row.src_port : ''}`;
   const dst = `${row.dst_ip || ''}${row.dst_port ? ':'+row.dst_port : ''}`;
   const msg = row.message || '';
+  const actions = renderActionButtons(row);
   return `
     <td class="px-4 py-2">${row.event_time}</td>
   <td class="px-4 py-2">${row.hostname ? row.hostname : ''}</td>
@@ -108,7 +134,8 @@ function renderRow(row) {
     <td class="px-4 py-2">${dst}</td>
     <td class="px-4 py-2">${row.iface_in || ''}</td>
     <td class="px-4 py-2">${row.iface_out || ''}</td>
-    <td class="px-4 py-2 truncate-cell" title="${msg.replaceAll('"','&quot;')}">${msg}</td>
+    <td class="px-4 py-2 truncate-cell" title="${msg.replaceAll('\"','&quot;')}">${msg}</td>
+    <td class="px-4 py-2 actions-cell">${actions}</td>
   `;
 }
 
@@ -139,6 +166,8 @@ async function fetchBlocked(reset=false, prepend=false) {
         const fragment = document.createDocumentFragment();
         data.forEach(row => {
           const tr = document.createElement("tr");
+          tr.dataset.hostname = row.hostname || '';
+          tr.dataset.row = JSON.stringify(row);
           tr.innerHTML = renderRow(row);
           tr.classList.add("new-row");
           fragment.appendChild(tr);
@@ -159,6 +188,8 @@ async function fetchBlocked(reset=false, prepend=false) {
       const fragment = document.createDocumentFragment();
       data.forEach(row => {
         const tr = document.createElement("tr");
+        tr.dataset.hostname = row.hostname || '';
+        tr.dataset.row = JSON.stringify(row);
         tr.innerHTML = renderRow(row);
         fragment.appendChild(tr);
       });
@@ -242,6 +273,71 @@ document.getElementById("new-logs-banner").addEventListener("click", () => {
 
 // Initial load
 fetchBlocked(true);
+
+// Delegate button actions
+document.addEventListener('click', async (e) => {
+  const unblockIpBtn = e.target.closest('.unblock-ip-btn');
+  const unblockHostBtn = e.target.closest('.unblock-host-btn');
+  const addWlBtn = e.target.closest('.add-wl-btn');
+
+  if (unblockIpBtn) {
+    const ip = unblockIpBtn.dataset.ip;
+    const host = unblockIpBtn.dataset.host || '';
+    if (!ip) return;
+    unblockIpBtn.disabled = true;
+    try {
+      const res = await fetch('blocked_actions.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ action: 'unblock_ip', ip, hostname: host })
+      });
+      const json = await res.json();
+      alert(json.message || (json.status === 'ok' ? 'IP unblocked.' : 'Failed to unblock IP'));
+    } catch (err) {
+      alert('Network error while unblocking IP');
+    } finally {
+      unblockIpBtn.disabled = false;
+    }
+  }
+
+  if (unblockHostBtn) {
+    const host = unblockHostBtn.dataset.host;
+    if (!host) return;
+    unblockHostBtn.disabled = true;
+    try {
+      const res = await fetch('blocked_actions.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ action: 'unblock_hostname', hostname: host })
+      });
+      const json = await res.json();
+      alert(json.message || (json.status === 'ok' ? 'Hostname unblocked.' : 'Failed to unblock hostname'));
+    } catch (err) {
+      alert('Network error while unblocking hostname');
+    } finally {
+      unblockHostBtn.disabled = false;
+    }
+  }
+
+  if (addWlBtn) {
+    const host = addWlBtn.dataset.host;
+    if (!host) return;
+    addWlBtn.disabled = true;
+    try {
+      const res = await fetch('blocked_actions.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ action: 'add_to_whitelist', hostname: host })
+      });
+      const json = await res.json();
+      alert(json.message || (json.status === 'ok' ? 'Added to whitelist.' : 'Failed to add to whitelist'));
+    } catch (err) {
+      alert('Network error while adding to whitelist');
+    } finally {
+      addWlBtn.disabled = false;
+    }
+  }
+});
 </script>
 
 </body>

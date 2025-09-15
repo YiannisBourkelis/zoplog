@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS `accept_languages` (
   `accept_language` varchar(255) NOT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `accept_language` (`accept_language`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 
 -- IP addresses table
 CREATE TABLE IF NOT EXISTS `ip_addresses` (
@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS `ip_addresses` (
   `ip_address` varchar(45) NOT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uniq_ip_address` (`ip_address`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 
 -- MAC addresses table
 CREATE TABLE IF NOT EXISTS `mac_addresses` (
@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS `mac_addresses` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `mac_address` (`mac_address`),
   KEY `idx_mac_address` (`mac_address`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 
 -- Paths table
 CREATE TABLE IF NOT EXISTS `paths` (
@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS `paths` (
   `path` text NOT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uniq_path` (`path`(255))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 
 -- User agents table
 CREATE TABLE IF NOT EXISTS `user_agents` (
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS `user_agents` (
   `user_agent` text NOT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uniq_user_agent` (`user_agent`(255))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 
 -- Hostnames table
 CREATE TABLE IF NOT EXISTS `hostnames` (
@@ -56,4 +56,4 @@ CREATE TABLE IF NOT EXISTS `hostnames` (
   KEY `idx_hostname` (`hostname`),
   KEY `ip_id` (`ip_id`),
   CONSTRAINT `hostnames_ibfk_1` FOREIGN KEY (`ip_id`) REFERENCES `ip_addresses` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
