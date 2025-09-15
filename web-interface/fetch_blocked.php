@@ -69,24 +69,12 @@ SELECT
     src_ip.ip_address AS src_ip,
     dst_ip.ip_address AS dst_ip,
     h.hostname AS hostname,
-    COALESCE(bc.cnt_url, 0) AS cnt_url_blocklists,
-    COALESCE(bc.cnt_manual_system, 0) AS cnt_manual_system_blocklists
+    COALESCE((SELECT SUM(CASE WHEN bl.type = 'url' THEN 1 ELSE 0 END) FROM blocklist_domains bd JOIN blocklists bl ON bl.id = bd.blocklist_id WHERE bd.domain = h.hostname), 0) AS cnt_url_blocklists,
+    COALESCE((SELECT SUM(CASE WHEN bl.type IN ('manual','system') THEN 1 ELSE 0 END) FROM blocklist_domains bd JOIN blocklists bl ON bl.id = bd.blocklist_id WHERE bd.domain = h.hostname), 0) AS cnt_manual_system_blocklists
 FROM blocked_events be
 LEFT JOIN ip_addresses src_ip ON be.src_ip_id = src_ip.id
 LEFT JOIN ip_addresses dst_ip ON be.dst_ip_id = dst_ip.id
-LEFT JOIN (
-    SELECT ip_id, MIN(hostname) AS hostname
-    FROM hostnames
-    GROUP BY ip_id
-) h ON h.ip_id = dst_ip.id
-LEFT JOIN (
-    SELECT bd.domain,
-                 SUM(CASE WHEN bl.type = 'url' THEN 1 ELSE 0 END) AS cnt_url,
-                 SUM(CASE WHEN bl.type IN ('manual','system') THEN 1 ELSE 0 END) AS cnt_manual_system
-    FROM blocklist_domains bd
-    JOIN blocklists bl ON bl.id = bd.blocklist_id
-    GROUP BY bd.domain
-) bc ON bc.domain = h.hostname
+LEFT JOIN hostnames h ON h.ip_id = dst_ip.id AND h.hostname = (SELECT MIN(hostname) FROM hostnames h2 WHERE h2.ip_id = dst_ip.id)
 $where_sql
 ORDER BY be.event_time $order
 $limit_sql
