@@ -8,10 +8,12 @@ CREATE TABLE IF NOT EXISTS `blocklists` (
   `url` text NOT NULL,
   `description` text DEFAULT NULL,
   `category` enum('adware','malware','phishing','cryptomining','tracking','scam','fakenews','gambling','social','porn','streaming','proxyvpn','shopping','hate','other') NOT NULL,
+  `type` enum('url','manual','system') NOT NULL DEFAULT 'url',
   `active` enum('active','inactive') NOT NULL DEFAULT 'active',
   `created_at` datetime NOT NULL,
   `updated_at` datetime NOT NULL,
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  KEY `idx_type` (`type`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 
 -- Blocklist domains table
@@ -41,4 +43,8 @@ CREATE TABLE IF NOT EXISTS `blocked_ips` (
   CONSTRAINT `fk_blocked_ips_domain` FOREIGN KEY (`blocklist_domain_id`) REFERENCES `blocklist_domains` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_blocked_ips_ip` FOREIGN KEY (`ip_id`) REFERENCES `ip_addresses` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
+
+-- Create system blocklist for user-added blocked domains
+INSERT IGNORE INTO `blocklists` (`url`, `description`, `category`, `active`, `created_at`, `updated_at`, `type`) VALUES
+('', 'System blocklist for user-blocked domains', 'other', 'inactive', NOW(), NOW(), 'system');
 
