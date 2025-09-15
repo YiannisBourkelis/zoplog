@@ -1103,6 +1103,7 @@ async function loadBrowserLanguageStats() {
 // Load all async data when page loads
 document.addEventListener('DOMContentLoaded', function() {
   console.log('DOM loaded, starting async data loading...');
+  updateChartsRealtime(); // Load traffic chart data immediately
   loadTopHosts();
   loadBlockedHosts();
   loadTimelineData();
@@ -1116,6 +1117,7 @@ if (document.readyState === 'loading') {
 } else {
   // Document already loaded
   console.log('Document already loaded, starting async data loading...');
+  updateChartsRealtime(); // Load traffic chart data immediately
   loadTopHosts();
   loadBlockedHosts();
   loadTimelineData();
