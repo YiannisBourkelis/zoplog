@@ -149,37 +149,52 @@ $top365 = $mysqli->query("
 
 // Top 200 blocked hosts (30 days) - normalized to reduce retry noise
 $topBlocked30 = $mysqli->query("
-    SELECT 
+    SELECT
         COALESCE(h.hostname, dst_ip.ip_address, 'Unknown') as blocked_host,
         COUNT(DISTINCT CONCAT(
-            COALESCE(src_ip_id, ''), '-',
-            COALESCE(dst_ip_id, ''), '-', 
-            COALESCE(dst_port, ''), '-',
-            FLOOR(UNIX_TIMESTAMP(event_time) / 30)
+            COALESCE(be.src_ip_id, ''), '-',
+            COALESCE(be.dst_ip_id, ''), '-',
+            COALESCE(be.dst_port, ''), '-',
+            be.time_bucket
         )) as cnt
-    FROM blocked_events be
+    FROM (
+        SELECT DISTINCT
+            dst_ip_id,
+            src_ip_id,
+            dst_port,
+            FLOOR(UNIX_TIMESTAMP(event_time) / 30) as time_bucket,
+            event_time
+        FROM blocked_events
+        WHERE event_time >= NOW() - INTERVAL 30 DAY
+    ) be
     LEFT JOIN ip_addresses dst_ip ON be.dst_ip_id = dst_ip.id
     LEFT JOIN hostnames h ON h.ip_id = dst_ip.id
-    WHERE be.event_time >= NOW() - INTERVAL 30 DAY
     GROUP BY COALESCE(h.hostname, dst_ip.ip_address)
     ORDER BY cnt DESC
     LIMIT 200
 ");
 
-// Top 200 blocked hosts (365 days) - normalized to reduce retry noise  
+// Top 200 blocked hosts (365 days) - optimized with normalization
 $topBlocked365 = $mysqli->query("
-    SELECT 
+    SELECT
         COALESCE(h.hostname, dst_ip.ip_address, 'Unknown') as blocked_host,
         COUNT(DISTINCT CONCAT(
-            COALESCE(src_ip_id, ''), '-',
-            COALESCE(dst_ip_id, ''), '-', 
-            COALESCE(dst_port, ''), '-',
-            FLOOR(UNIX_TIMESTAMP(event_time) / 30)
+            COALESCE(be.src_ip_id, ''), '-',
+            COALESCE(be.dst_ip_id, ''), '-',
+            COALESCE(be.dst_port, ''), '-',
+            be.time_bucket
         )) as cnt
-    FROM blocked_events be
+    FROM (
+        SELECT DISTINCT
+            dst_ip_id,
+            src_ip_id,
+            dst_port,
+            FLOOR(UNIX_TIMESTAMP(event_time) / 30) as time_bucket
+        FROM blocked_events
+        WHERE event_time >= NOW() - INTERVAL 365 DAY
+    ) be
     LEFT JOIN ip_addresses dst_ip ON be.dst_ip_id = dst_ip.id
     LEFT JOIN hostnames h ON h.ip_id = dst_ip.id
-    WHERE be.event_time >= NOW() - INTERVAL 365 DAY
     GROUP BY COALESCE(h.hostname, dst_ip.ip_address)
     ORDER BY cnt DESC
     LIMIT 200
