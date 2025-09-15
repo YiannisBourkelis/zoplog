@@ -33,258 +33,32 @@ $uniqueRes = $mysqli->query("
 ");
 $uniqueIPs = $uniqueRes->fetch_assoc()["cnt"];
 
-// Top hosts
-$topHostsRes = $mysqli->query("
-    SELECT h.hostname, COUNT(*) AS cnt 
-    FROM packet_logs p
-    LEFT JOIN hostnames h ON p.hostname_id = h.id
-    WHERE h.hostname IS NOT NULL
-    GROUP BY h.hostname
-    ORDER BY cnt DESC
-    LIMIT 5
-");
+// Top hosts - loaded asynchronously
 $topHosts = [];
-while ($row = $topHostsRes->fetch_assoc()) {
-    $topHosts[] = $row;
-}
 
-// Requests over time (last 10 minutes, per minute)
-// Get allowed requests from packet_logs
-$allowedTimelineRes = $mysqli->query("
-    SELECT DATE_FORMAT(packet_timestamp, '%H:%i') AS minute, COUNT(*) AS cnt
-    FROM packet_logs
-    WHERE packet_timestamp >= DATE_SUB(DATE_SUB(NOW(), INTERVAL MINUTE(NOW()) MINUTE), INTERVAL 10 MINUTE)
-    GROUP BY minute
-    ORDER BY minute ASC
-");
-$allowedTimeline = [];
-while ($row = $allowedTimelineRes->fetch_assoc()) {
-    $allowedTimeline[$row['minute']] = $row['cnt'];
-}
-
-// Get blocked requests from blocked_events (normalized - group similar requests within 30-second windows)
-$blockedTimelineRes = $mysqli->query("
-    SELECT DATE_FORMAT(event_time, '%H:%i') AS minute, 
-           COUNT(DISTINCT CONCAT(
-               COALESCE(src_ip_id, ''), '-',
-               COALESCE(dst_ip_id, ''), '-', 
-               COALESCE(dst_port, ''), '-',
-               FLOOR(UNIX_TIMESTAMP(event_time) / 30) -- 30-second dedup window
-           )) AS cnt
-    FROM blocked_events
-    WHERE event_time >= DATE_SUB(DATE_SUB(NOW(), INTERVAL MINUTE(NOW()) MINUTE), INTERVAL 10 MINUTE)
-    GROUP BY minute
-    ORDER BY minute ASC
-");
-$blockedTimeline = [];
-while ($row = $blockedTimelineRes->fetch_assoc()) {
-    $blockedTimeline[$row['minute']] = $row['cnt'];
-}
-
-// Get all unique minutes from both datasets
-$allMinutes = array_unique(array_merge(array_keys($allowedTimeline), array_keys($blockedTimeline)));
-sort($allMinutes);
-
-// Create combined timeline
+// Timeline data - loaded asynchronously
 $timeline = [];
-foreach ($allMinutes as $minute) {
-    $allowed = $allowedTimeline[$minute] ?? 0;
-    $blocked = $blockedTimeline[$minute] ?? 0;
-    $total = $allowed + $blocked;
-    
+$currentTime = time();
+for ($i = 9; $i >= 0; $i--) {
+    $minute = date('H:i', $currentTime - ($i * 60));
     $timeline[] = [
         'minute' => $minute,
-        'allowed' => $allowed,
-        'blocked' => $blocked,
-        'total' => $total
+        'allowed' => 0,
+        'blocked' => 0,
+        'total' => 0
     ];
 }
 
-// If no data in last 10 minutes, create empty timeline to show the graph
-if (empty($timeline)) {
-    $currentTime = time();
-    for ($i = 9; $i >= 0; $i--) {
-        $minute = date('H:i', $currentTime - ($i * 60));
-        $timeline[] = [
-            'minute' => $minute,
-            'allowed' => 0,
-            'blocked' => 0,
-            'total' => 0
-        ];
-    }
-}
-
-// Calculate totals for the last 10 minutes for the pie chart
-$totalAllowed10min = array_sum(array_column($timeline, 'allowed'));
-$totalBlocked10min = array_sum(array_column($timeline, 'blocked'));
-$total10min = $totalAllowed10min + $totalBlocked10min;
-
-// Calculate percentages
-$allowedPercentage = $total10min > 0 ? round(($totalAllowed10min / $total10min) * 100, 1) : 0;
-$blockedPercentage = $total10min > 0 ? round(($totalBlocked10min / $total10min) * 100, 1) : 0;
+// Timeline percentages - loaded asynchronously
+$totalAllowed10min = 0;
+$totalBlocked10min = 0;
+$total10min = 0;
+$allowedPercentage = 0;
+$blockedPercentage = 0;
 
 // --- NEW STATS ---
 
-// Top 200 hosts (30 days)
-$top30 = $mysqli->query("
-    SELECT h.hostname, COUNT(*) as cnt
-    FROM packet_logs p
-    JOIN hostnames h ON p.hostname_id = h.id
-    WHERE p.packet_timestamp >= NOW() - INTERVAL 30 DAY
-    GROUP BY h.hostname
-    ORDER BY cnt DESC
-    LIMIT 200
-");
-
-// Top 200 hosts (365 days)
-$top365 = $mysqli->query("
-    SELECT h.hostname, COUNT(*) as cnt
-    FROM packet_logs p
-    JOIN hostnames h ON p.hostname_id = h.id
-    WHERE p.packet_timestamp >= NOW() - INTERVAL 365 DAY
-    GROUP BY h.hostname
-    ORDER BY cnt DESC
-    LIMIT 200
-");
-
-// Top 200 blocked hosts (30 days) - normalized to reduce retry noise
-$topBlocked30 = $mysqli->query("
-    SELECT
-        COALESCE(h.hostname, dst_ip.ip_address, 'Unknown') as blocked_host,
-        COUNT(DISTINCT CONCAT(
-            COALESCE(be.src_ip_id, ''), '-',
-            COALESCE(be.dst_ip_id, ''), '-',
-            COALESCE(be.dst_port, ''), '-',
-            be.time_bucket
-        )) as cnt
-    FROM (
-        SELECT DISTINCT
-            dst_ip_id,
-            src_ip_id,
-            dst_port,
-            FLOOR(UNIX_TIMESTAMP(event_time) / 30) as time_bucket,
-            event_time
-        FROM blocked_events
-        WHERE event_time >= NOW() - INTERVAL 30 DAY
-    ) be
-    LEFT JOIN ip_addresses dst_ip ON be.dst_ip_id = dst_ip.id
-    LEFT JOIN hostnames h ON h.ip_id = dst_ip.id
-    GROUP BY COALESCE(h.hostname, dst_ip.ip_address)
-    ORDER BY cnt DESC
-    LIMIT 200
-");
-
-// Top 200 blocked hosts (365 days) - optimized with normalization
-$topBlocked365 = $mysqli->query("
-    SELECT
-        COALESCE(h.hostname, dst_ip.ip_address, 'Unknown') as blocked_host,
-        COUNT(DISTINCT CONCAT(
-            COALESCE(be.src_ip_id, ''), '-',
-            COALESCE(be.dst_ip_id, ''), '-',
-            COALESCE(be.dst_port, ''), '-',
-            be.time_bucket
-        )) as cnt
-    FROM (
-        SELECT DISTINCT
-            dst_ip_id,
-            src_ip_id,
-            dst_port,
-            FLOOR(UNIX_TIMESTAMP(event_time) / 30) as time_bucket
-        FROM blocked_events
-        WHERE event_time >= NOW() - INTERVAL 365 DAY
-    ) be
-    LEFT JOIN ip_addresses dst_ip ON be.dst_ip_id = dst_ip.id
-    LEFT JOIN hostnames h ON h.ip_id = dst_ip.id
-    GROUP BY COALESCE(h.hostname, dst_ip.ip_address)
-    ORDER BY cnt DESC
-    LIMIT 200
-");
-
-// Browser stats - detailed categorization
-$uaRes = $mysqli->query("
-    SELECT ua.user_agent, COUNT(*) as cnt
-    FROM packet_logs p
-    JOIN user_agents ua ON p.user_agent_id = ua.id
-    WHERE ua.user_agent IS NOT NULL
-    GROUP BY ua.user_agent
-    ORDER BY cnt DESC
-");
-$detailedBrowsers = [];
-while ($row = $uaRes->fetch_assoc()) {
-    $ua = $row["user_agent"];
-    $cnt = $row["cnt"];
-    if (!$ua) continue;
-    
-    $browserName = "Other";
-    if (stripos($ua, "chrome") !== false && stripos($ua, "edg") === false && stripos($ua, "opr") === false) {
-        // Chrome versions
-        if (preg_match('/Chrome\/(\d+)/', $ua, $matches)) {
-            $browserName = "Chrome " . $matches[1];
-        } else {
-            $browserName = "Chrome";
-        }
-    } elseif (stripos($ua, "firefox") !== false) {
-        // Firefox versions
-        if (preg_match('/Firefox\/(\d+)/', $ua, $matches)) {
-            $browserName = "Firefox " . $matches[1];
-        } else {
-            $browserName = "Firefox";
-        }
-    } elseif (stripos($ua, "safari") !== false && stripos($ua, "chrome") === false) {
-        // Safari versions
-        if (preg_match('/Version\/(\d+)/', $ua, $matches)) {
-            $browserName = "Safari " . $matches[1];
-        } else {
-            $browserName = "Safari";
-        }
-    } elseif (stripos($ua, "edg") !== false) {
-        // Edge versions
-        if (preg_match('/Edg\/(\d+)/', $ua, $matches)) {
-            $browserName = "Edge " . $matches[1];
-        } else {
-            $browserName = "Edge";
-        }
-    } elseif (stripos($ua, "opera") !== false || stripos($ua, "opr/") !== false) {
-        // Opera versions
-        if (preg_match('/OPR\/(\d+)/', $ua, $matches)) {
-            $browserName = "Opera " . $matches[1];
-        } else {
-            $browserName = "Opera";
-        }
-    }
-    
-    if (!isset($detailedBrowsers[$browserName])) {
-        $detailedBrowsers[$browserName] = 0;
-    }
-    $detailedBrowsers[$browserName] += $cnt;
-}
-
-// Sort browsers by count and get top 20
-arsort($detailedBrowsers);
-$topBrowsers = array_slice($detailedBrowsers, 0, 20, true);
-$otherBrowsersCount = array_sum(array_slice($detailedBrowsers, 20));
-
-// Add "Other" category if there are more than 20 browsers
-if ($otherBrowsersCount > 0) {
-    $topBrowsers["Other"] = $otherBrowsersCount;
-}
-
-// Language stats
-$langRes = $mysqli->query("
-    SELECT al.accept_language
-    FROM packet_logs p
-    JOIN accept_languages al ON p.accept_language_id = al.id
-    WHERE al.accept_language IS NOT NULL
-");
-$langs = [];
-while ($row = $langRes->fetch_assoc()) {
-    $lang = substr($row["accept_language"], 0, 2);
-    if (!$lang) continue;
-    if (!isset($langs[$lang])) $langs[$lang] = 0;
-    $langs[$lang]++;
-}
-arsort($langs);
-$langs = array_slice($langs, 0, 10, true);
+// Top hosts and blocked hosts data - loaded asynchronously
 
 // System Resources Monitoring
 function getSystemMetrics() {
@@ -489,11 +263,11 @@ $systemTimeline = [
           <div class="flex justify-center space-x-4">
             <span class="flex items-center">
               <span class="w-3 h-3 bg-green-500 rounded-full mr-2"></span>
-              Allowed: <?= number_format($totalAllowed10min) ?> (<?= $allowedPercentage ?>%)
+              Allowed: <span id="allowed-count">Loading...</span>
             </span>
             <span class="flex items-center">
               <span class="w-3 h-3 bg-red-500 rounded-full mr-2"></span>
-              Blocked: <?= number_format($totalBlocked10min) ?> (<?= $blockedPercentage ?>%) <span class="text-xs">*normalized</span>
+              Blocked: <span id="blocked-count">Loading...</span> <span class="text-xs">*normalized</span>
             </span>
           </div>
         </div>
@@ -502,8 +276,14 @@ $systemTimeline = [
       <!-- Timeline chart -->
       <div class="bg-white rounded-2xl shadow p-6 h-96 flex flex-col">
         <h2 class="text-xl font-semibold mb-4">Requests Over Time (Last 10 min)</h2>
-        <div class="flex-1">
-          <canvas id="timelineChart"></canvas>
+        <div id="timelineLoading" class="flex-1 flex items-center justify-center">
+          <div class="text-center">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            <p class="mt-2 text-gray-600">Loading timeline data...</p>
+          </div>
+        </div>
+        <div class="flex-1" id="timelineChartContainer">
+          <canvas id="timelineChart" class="hidden"></canvas>
         </div>
       </div>
     </div>
@@ -652,20 +432,18 @@ $systemTimeline = [
     <!-- Top Hosts -->
     <div class="bg-white rounded-2xl shadow p-6 mt-6">
       <h2 class="text-xl font-semibold mb-4">Top Hosts</h2>
-      <table id="topHostsTable" class="min-w-full text-sm text-left">
+      <div id="topHostsLoading" class="text-center py-8">
+        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        <p class="mt-2 text-gray-600">Loading top hosts...</p>
+      </div>
+      <table id="topHostsTable" class="min-w-full text-sm text-left hidden">
         <thead class="bg-gray-200">
           <tr>
             <th class="px-4 py-2">Hostname</th>
             <th class="px-4 py-2">Requests</th>
           </tr>
         </thead>
-        <tbody>
-          <?php foreach ($topHosts as $host): ?>
-            <tr>
-              <td class="px-4 py-2"><?= htmlspecialchars($host["hostname"]) ?></td>
-              <td class="px-4 py-2"><?= number_format($host["cnt"]) ?></td>
-            </tr>
-          <?php endforeach; ?>
+        <tbody id="topHostsBody">
         </tbody>
       </table>
     </div>
@@ -676,11 +454,13 @@ $systemTimeline = [
       <div class="bg-white rounded-2xl shadow p-6">
         <h2 class="text-xl font-semibold mb-4 text-green-600">Top 200 Hosts (Last 30 Days)</h2>
         <p class="text-sm text-gray-600 mb-3">Most frequently accessed allowed destinations</p>
-        <ol class="list-decimal pl-6 space-y-1 h-64 overflow-y-auto">
-          <?php while ($row = $top30->fetch_assoc()): ?>
-            <li class="text-sm"><?= htmlspecialchars($row['hostname']) ?> 
-                <span class="text-gray-500">(<?= number_format($row['cnt']) ?>)</span></li>
-          <?php endwhile; ?>
+        <div id="topHosts30Loading" class="h-64 flex items-center justify-center">
+          <div class="text-center">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
+            <p class="mt-2 text-gray-600">Loading top hosts...</p>
+          </div>
+        </div>
+        <ol id="topHosts30List" class="list-decimal pl-6 space-y-1 h-64 overflow-y-auto hidden">
         </ol>
       </div>
 
@@ -688,11 +468,13 @@ $systemTimeline = [
       <div class="bg-white rounded-2xl shadow p-6">
         <h2 class="text-xl font-semibold mb-4 text-green-600">Top 200 Hosts (Last 365 Days)</h2>
         <p class="text-sm text-gray-600 mb-3">Most frequently accessed allowed destinations</p>
-        <ol class="list-decimal pl-6 space-y-1 h-64 overflow-y-auto">
-          <?php while ($row = $top365->fetch_assoc()): ?>
-            <li class="text-sm"><?= htmlspecialchars($row['hostname']) ?> 
-                <span class="text-gray-500">(<?= number_format($row['cnt']) ?>)</span></li>
-          <?php endwhile; ?>
+        <div id="topHosts365Loading" class="h-64 flex items-center justify-center">
+          <div class="text-center">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
+            <p class="mt-2 text-gray-600">Loading top hosts...</p>
+          </div>
+        </div>
+        <ol id="topHosts365List" class="list-decimal pl-6 space-y-1 h-64 overflow-y-auto hidden">
         </ol>
       </div>
     </div>
@@ -703,11 +485,13 @@ $systemTimeline = [
       <div class="bg-white rounded-2xl shadow p-6">
         <h2 class="text-xl font-semibold mb-4 text-red-600">Top 200 Blocked Hosts (Last 30 Days)</h2>
         <p class="text-sm text-gray-600 mb-3">Most frequently blocked destinations <span class="text-xs">*normalized</span></p>
-        <ol class="list-decimal pl-6 space-y-1 h-64 overflow-y-auto">
-          <?php while ($row = $topBlocked30->fetch_assoc()): ?>
-            <li class="text-sm"><?= htmlspecialchars($row['blocked_host']) ?> 
-                <span class="text-red-500">(<?= number_format($row['cnt']) ?> blocked)</span></li>
-          <?php endwhile; ?>
+        <div id="blockedHosts30Loading" class="h-64 flex items-center justify-center">
+          <div class="text-center">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-red-600"></div>
+            <p class="mt-2 text-gray-600">Loading blocked hosts...</p>
+          </div>
+        </div>
+        <ol id="blockedHosts30List" class="list-decimal pl-6 space-y-1 h-64 overflow-y-auto hidden">
         </ol>
       </div>
 
@@ -715,11 +499,13 @@ $systemTimeline = [
       <div class="bg-white rounded-2xl shadow p-6">
         <h2 class="text-xl font-semibold mb-4 text-red-600">Top 200 Blocked Hosts (Last 365 Days)</h2>
         <p class="text-sm text-gray-600 mb-3">Most frequently blocked destinations <span class="text-xs">*normalized</span></p>
-        <ol class="list-decimal pl-6 space-y-1 h-64 overflow-y-auto">
-          <?php while ($row = $topBlocked365->fetch_assoc()): ?>
-            <li class="text-sm"><?= htmlspecialchars($row['blocked_host']) ?> 
-                <span class="text-red-500">(<?= number_format($row['cnt']) ?> blocked)</span></li>
-          <?php endwhile; ?>
+        <div id="blockedHosts365Loading" class="h-64 flex items-center justify-center">
+          <div class="text-center">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-red-600"></div>
+            <p class="mt-2 text-gray-600">Loading blocked hosts...</p>
+          </div>
+        </div>
+        <ol id="blockedHosts365List" class="list-decimal pl-6 space-y-1 h-64 overflow-y-auto hidden">
         </ol>
       </div>
     </div>
@@ -727,20 +513,37 @@ $systemTimeline = [
     <!-- Browser and Language Charts -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
       <!-- Browsers -->
-      <div class="bg-white rounded-2xl shadow p-6">
+      <div class="bg-white rounded-2xl shadow p-6 flex flex-col">
         <h2 class="text-xl font-semibold mb-4">Browser Usage (Top 20)</h2>
-        <canvas id="browserChart"></canvas>
+        <div id="browserLoading" class="flex-1 flex items-center justify-center">
+          <div class="text-center">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
+            <p class="mt-2 text-gray-600">Loading browser stats...</p>
+          </div>
+        </div>
+        <div class="flex-1" id="browserChartContainer">
+          <canvas id="browserChart" class="hidden w-full h-full"></canvas>
+        </div>
       </div>
 
       <!-- Languages -->
-      <div class="bg-white rounded-2xl shadow p-6">
+      <div class="bg-white rounded-2xl shadow p-6 flex flex-col">
         <h2 class="text-xl font-semibold mb-4">Top Languages</h2>
-        <canvas id="langChart"></canvas>
+        <div id="langLoading" class="flex-1 flex items-center justify-center">
+          <div class="text-center">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
+            <p class="mt-2 text-gray-600">Loading language stats...</p>
+          </div>
+        </div>
+        <div class="flex-1" id="langChartContainer">
+          <canvas id="langChart" class="hidden w-full h-full"></canvas>
+        </div>
       </div>
     </div>
   </div>
 
 <script>
+console.log('ZopLog JavaScript loaded successfully');
 // Chart references for real-time updates
 let trafficChart;
 let timelineChart;
@@ -750,7 +553,7 @@ let systemChart;
 const trafficData = {
   labels: ['Allowed Requests', 'Blocked Requests (Normalized)'],
   datasets: [{
-    data: [<?= $totalAllowed10min ?>, <?= $totalBlocked10min ?>],
+    data: [0, 0], // Will be updated with real data from API
     backgroundColor: ['#10b981', '#ef4444'],
     borderColor: ['#059669', '#dc2626'],
     borderWidth: 2
@@ -1034,86 +837,290 @@ timelineChart = new Chart(document.getElementById('timelineChart'), {
   }
 });
 
-// Browser chart (Pie)
-const browserData = <?= json_encode($topBrowsers) ?>;
-new Chart(document.getElementById('browserChart'), {
-  type: 'pie',
-  data: {
-    labels: Object.keys(browserData),
-    datasets: [{
-      data: Object.values(browserData),
-      backgroundColor: [
-        '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#d946ef',
-        '#f97316', '#84cc16', '#06b6d4', '#8b5cf6', '#f59e0b', '#ef4444', '#10b981',
-        '#3b82f6', '#d946ef', '#f97316', '#84cc16', '#06b6d4', '#8b5cf6', '#6b7280'
-      ]
-    }]
-  },
-  options: {
-    responsive: true,
-    plugins: {
-      legend: {
-        position: 'right',
-        labels: {
-          boxWidth: 12,
-          padding: 10,
-          usePointStyle: true
-        }
-      },
-      tooltip: {
-        callbacks: {
-          label: function(context) {
-            const label = context.label || '';
-            const value = context.parsed;
-            const total = Object.values(browserData).reduce((a, b) => a + b, 0);
-            const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
-            return label + ': ' + value.toLocaleString() + ' (' + percentage + '%)';
+// Browser and language charts are now loaded asynchronously
+
+// Async loading functions for initial page load
+async function loadTopHosts() {
+  try {
+    console.log('Loading top hosts...');
+    const response = await fetch('/api/top_hosts.php');
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    const data = await response.json();
+    console.log('Top hosts data received:', data);
+    
+    // Update the first Top Hosts table (top 5 hosts)
+    const topHostsTable = document.querySelector('#topHostsTable tbody');
+    if (topHostsTable && data) {
+      topHostsTable.innerHTML = data.slice(0, 5).map(host => 
+        `<tr>
+          <td class="px-4 py-2">${host.hostname}</td>
+          <td class="px-4 py-2">${host.cnt.toLocaleString()}</td>
+        </tr>`
+      ).join('');
+      console.log('Updated topHostsTable with top 5 hosts');
+    }
+    
+    // Update 30-day top hosts (using ordered list)
+    const topHosts30List = document.getElementById('topHosts30List');
+    if (topHosts30List && data) {
+      topHosts30List.innerHTML = data.slice(0, 200).map(host => 
+        `<li class="flex justify-between items-center py-1">
+          <span class="text-gray-800">${host.hostname}</span>
+          <span class="text-gray-600 font-medium">${host.cnt.toLocaleString()}</span>
+        </li>`
+      ).join('');
+      console.log('Updated topHosts30List with', data.length, 'items');
+    }
+    
+    // Update 365-day top hosts (using ordered list) - same data for now
+    const topHosts365List = document.getElementById('topHosts365List');
+    if (topHosts365List && data) {
+      topHosts365List.innerHTML = data.slice(0, 200).map(host => 
+        `<li class="flex justify-between items-center py-1">
+          <span class="text-gray-800">${host.hostname}</span>
+          <span class="text-gray-600 font-medium">${host.cnt.toLocaleString()}</span>
+        </li>`
+      ).join('');
+      console.log('Updated topHosts365List with', data.length, 'items');
+    }
+    
+    // Hide loading spinners and show content
+    document.getElementById('topHostsLoading').classList.add('hidden');
+    document.getElementById('topHostsTable').classList.remove('hidden');
+    document.getElementById('topHosts30Loading').classList.add('hidden');
+    document.getElementById('topHosts30List').classList.remove('hidden');
+    document.getElementById('topHosts365Loading').classList.add('hidden');
+    document.getElementById('topHosts365List').classList.remove('hidden');
+    console.log('Top hosts loading completed successfully');
+    
+  } catch (error) {
+    console.error('Error loading top hosts:', error);
+    // Show error state
+    document.getElementById('topHostsLoading').innerHTML = '<div class="text-center text-red-600">Error loading data</div>';
+    document.getElementById('topHosts30Loading').innerHTML = '<div class="text-center text-red-600">Error loading data</div>';
+    document.getElementById('topHosts365Loading').innerHTML = '<div class="text-center text-red-600">Error loading data</div>';
+  }
+}
+
+async function loadBlockedHosts() {
+  try {
+    console.log('Loading blocked hosts...');
+    const response = await fetch('/api/top_blocked_hosts.php');
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    const data = await response.json();
+    console.log('Blocked hosts data received:', data);
+    
+    // Update 30-day blocked hosts (using ordered list)
+    const blockedHosts30List = document.getElementById('blockedHosts30List');
+    if (blockedHosts30List && data.blocked30) {
+      blockedHosts30List.innerHTML = data.blocked30.map(host => 
+        `<li class="flex justify-between items-center py-1">
+          <span class="text-gray-800">${host.blocked_host}</span>
+          <span class="text-gray-600 font-medium">${host.cnt.toLocaleString()}</span>
+        </li>`
+      ).join('');
+    }
+    
+    // Update 365-day blocked hosts (using ordered list)
+    const blockedHosts365List = document.getElementById('blockedHosts365List');
+    if (blockedHosts365List && data.blocked365) {
+      blockedHosts365List.innerHTML = data.blocked365.map(host => 
+        `<li class="flex justify-between items-center py-1">
+          <span class="text-gray-800">${host.blocked_host}</span>
+          <span class="text-gray-600 font-medium">${host.cnt.toLocaleString()}</span>
+        </li>`
+      ).join('');
+    }
+    
+    // Hide loading spinners and show lists
+    document.getElementById('blockedHosts30Loading').classList.add('hidden');
+    document.getElementById('blockedHosts30List').classList.remove('hidden');
+    document.getElementById('blockedHosts365Loading').classList.add('hidden');
+    document.getElementById('blockedHosts365List').classList.remove('hidden');
+    
+  } catch (error) {
+    console.error('Error loading blocked hosts:', error);
+    // Show error state
+    document.getElementById('blockedHosts30Loading').innerHTML = '<div class="text-center text-red-600">Error loading data</div>';
+    document.getElementById('blockedHosts365Loading').innerHTML = '<div class="text-center text-red-600">Error loading data</div>';
+  }
+}
+
+async function loadTimelineData() {
+  try {
+    console.log('Loading timeline data...');
+    const response = await fetch('/api/timeline.php');
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    const data = await response.json();
+    console.log('Timeline data received:', data);
+    
+    // Update timeline chart
+    if (timelineChart && data.timeline) {
+      timelineChart.data.labels = data.timeline.map(item => item.minute);
+      timelineChart.data.datasets[0].data = data.timeline.map(item => item.allowed);
+      timelineChart.data.datasets[1].data = data.timeline.map(item => item.blocked);
+      timelineChart.data.datasets[2].data = data.timeline.map(item => item.total);
+      timelineChart.update();
+      console.log('Timeline chart updated with', data.timeline.length, 'data points');
+    } else {
+      console.warn('Timeline chart not ready or no data received');
+    }
+    
+    // Hide loading spinner and show chart
+    document.getElementById('timelineLoading').classList.add('hidden');
+    document.getElementById('timelineChart').classList.remove('hidden');
+    
+  } catch (error) {
+    console.error('Error loading timeline data:', error);
+    // Show error state
+    document.getElementById('timelineLoading').innerHTML = '<div class="text-center text-red-600">Error loading timeline data</div>';
+  }
+}
+
+async function loadBrowserLanguageStats() {
+  try {
+    console.log('Loading browser/language stats...');
+    const response = await fetch('/api/browser_language_stats.php');
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    const data = await response.json();
+    console.log('Browser/language data received:', data);
+    
+    // Update browser chart
+    if (data.browsers) {
+      const browserChart = new Chart(document.getElementById('browserChart'), {
+        type: 'pie',
+        data: {
+          labels: Object.keys(data.browsers),
+          datasets: [{
+            data: Object.values(data.browsers),
+            backgroundColor: [
+              '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#d946ef',
+              '#f97316', '#84cc16', '#06b6d4', '#8b5cf6', '#f59e0b', '#ef4444', '#10b981',
+              '#3b82f6', '#d946ef', '#f97316', '#84cc16', '#06b6d4', '#8b5cf6', '#6b7280'
+            ]
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          layout: {
+            padding: {
+              top: 10,
+              bottom: 10,
+              left: 10,
+              right: 10
+            }
+          },
+          plugins: {
+            legend: {
+              position: 'right',
+              labels: {
+                boxWidth: 12,
+                padding: 10,
+                usePointStyle: true
+              }
+            },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  const label = context.label || '';
+                  const value = context.parsed;
+                  const total = Object.values(data.browsers).reduce((a, b) => a + b, 0);
+                  const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+                  return label + ': ' + value.toLocaleString() + ' (' + percentage + '%)';
+                }
+              }
+            }
           }
         }
-      }
+      });
     }
+    
+    // Update language chart
+    if (data.languages) {
+      const langChart = new Chart(document.getElementById('langChart'), {
+        type: 'pie',
+        data: {
+          labels: Object.keys(data.languages),
+          datasets: [{
+            data: Object.values(data.languages),
+            backgroundColor: [
+              '#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#d946ef',
+              '#f97316', '#84cc16', '#6b7280'
+            ]
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          layout: {
+            padding: {
+              top: 10,
+              bottom: 10,
+              left: 10,
+              right: 10
+            }
+          },
+          plugins: {
+            legend: {
+              position: 'right',
+              labels: {
+                boxWidth: 12,
+                padding: 10,
+                usePointStyle: true
+              }
+            },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  const label = context.label || '';
+                  const value = context.parsed;
+                  const total = Object.values(data.languages).reduce((a, b) => a + b, 0);
+                  const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+                  return label + ': ' + value.toLocaleString() + ' (' + percentage + '%)';
+                }
+              }
+            }
+          }
+        }
+      });
+    }
+    
+    // Hide loading spinners and show charts
+    document.getElementById('browserLoading').classList.add('hidden');
+    document.getElementById('browserChart').classList.remove('hidden');
+    document.getElementById('langLoading').classList.add('hidden');
+    document.getElementById('langChart').classList.remove('hidden');
+    
+  } catch (error) {
+    console.error('Error loading browser/language stats:', error);
+    // Show error state
+    document.getElementById('browserLoading').innerHTML = '<div class="text-center text-red-600">Error loading data</div>';
+    document.getElementById('langLoading').innerHTML = '<div class="text-center text-red-600">Error loading data</div>';
   }
+}
+
+// Load all async data when page loads
+document.addEventListener('DOMContentLoaded', function() {
+  console.log('DOM loaded, starting async data loading...');
+  loadTopHosts();
+  loadBlockedHosts();
+  loadTimelineData();
+  loadBrowserLanguageStats();
 });
 
-// Language chart (Pie)
-const langData = <?= json_encode($langs) ?>;
-new Chart(document.getElementById('langChart'), {
-  type: 'pie',
-  data: {
-    labels: Object.keys(langData),
-    datasets: [{
-      data: Object.values(langData),
-      backgroundColor: [
-        '#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#d946ef',
-        '#f97316', '#84cc16', '#6b7280'
-      ]
-    }]
-  },
-  options: {
-    responsive: true,
-    plugins: {
-      legend: {
-        position: 'right',
-        labels: {
-          boxWidth: 12,
-          padding: 10,
-          usePointStyle: true
-        }
-      },
-      tooltip: {
-        callbacks: {
-          label: function(context) {
-            const label = context.label || '';
-            const value = context.parsed;
-            const total = Object.values(langData).reduce((a, b) => a + b, 0);
-            const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
-            return label + ': ' + value.toLocaleString() + ' (' + percentage + '%)';
-          }
-        }
-      }
-    }
-  }
-});
+// Also try loading immediately in case DOMContentLoaded doesn't fire
+console.log('Script loaded, attempting immediate async loading...');
+if (document.readyState === 'loading') {
+  // Document still loading, wait for DOMContentLoaded
+} else {
+  // Document already loaded
+  console.log('Document already loaded, starting async data loading...');
+  loadTopHosts();
+  loadBlockedHosts();
+  loadTimelineData();
+  loadBrowserLanguageStats();
+}
 
 // Real-time chart updates every 2 seconds
 async function updateChartsRealtime() {
@@ -1166,18 +1173,11 @@ async function updateChartsRealtime() {
       trafficChart.update('none'); // 'none' for no animation
       
       // Update the summary text below the pie chart
-      const summaryDiv = document.querySelector('#trafficChart').parentElement.querySelector('.mt-4 .flex');
-      if (summaryDiv) {
-        summaryDiv.innerHTML = `
-          <span class="flex items-center">
-            <span class="w-3 h-3 bg-green-500 rounded-full mr-2"></span>
-            Allowed: ${breakdown.allowed.toLocaleString()} (${breakdown.allowed_percentage}%)
-          </span>
-          <span class="flex items-center">
-            <span class="w-3 h-3 bg-red-500 rounded-full mr-2"></span>
-            Blocked: ${breakdown.blocked.toLocaleString()} (${breakdown.blocked_percentage}%) <span class="text-xs">*normalized</span>
-          </span>
-        `;
+      const allowedSpan = document.getElementById('allowed-count');
+      const blockedSpan = document.getElementById('blocked-count');
+      if (allowedSpan && blockedSpan) {
+        allowedSpan.textContent = `${breakdown.allowed.toLocaleString()} (${breakdown.allowed_percentage}%)`;
+        blockedSpan.textContent = `${breakdown.blocked.toLocaleString()} (${breakdown.blocked_percentage}%)`;
       }
     }
     
