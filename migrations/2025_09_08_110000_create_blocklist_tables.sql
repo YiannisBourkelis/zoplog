@@ -41,3 +41,4 @@ CREATE TABLE IF NOT EXISTS `blocked_ips` (
   CONSTRAINT `fk_blocked_ips_domain` FOREIGN KEY (`blocklist_domain_id`) REFERENCES `blocklist_domains` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_blocked_ips_ip` FOREIGN KEY (`ip_id`) REFERENCES `ip_addresses` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
+
