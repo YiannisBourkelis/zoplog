@@ -10,6 +10,120 @@
   <style>
     .new-row { background-color: #fee2e2; transition: background-color 3s ease; }
     .truncate-cell { max-width: 28rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    
+    /* Click action buttons styling */
+    .table-container {
+      position: relative;
+    }
+    
+    .table-row {
+      position: relative;
+      transition: background-color 0.2s ease;
+      cursor: pointer;
+    }
+    
+    .table-row:hover {
+      background-color: #f8fafc;
+    }
+    
+    .table-row.active {
+      background-color: #eff6ff;
+      border-left: 3px solid #3b82f6;
+    }
+    
+    .hover-actions {
+      position: fixed;
+      right: 20px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(4px);
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      padding: 8px;
+      display: none;
+      z-index: 50;
+      gap: 4px;
+      border: 1px solid rgba(226, 232, 240, 0.8);
+      pointer-events: auto;
+      flex-direction: column;
+      min-width: 180px;
+    }
+    
+    .hover-actions-active {
+      display: flex !important;
+    }
+    
+    .hover-actions .button-row {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 6px;
+    }
+    
+    .hover-actions .info-text {
+      font-size: 11px;
+      color: #64748b;
+      padding: 2px 4px;
+      border-top: 1px solid #e2e8f0;
+      background: rgba(248, 250, 252, 0.8);
+      border-radius: 4px;
+      line-height: 1.2;
+    }
+    
+    .hover-actions .info-text .hostname {
+      font-weight: 600;
+      color: #475569;
+    }
+    
+    .hover-actions .info-text .ip {
+      color: #64748b;
+      font-family: monospace;
+    }
+    
+    .hover-actions button {
+      font-size: 12px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      transition: all 0.2s ease;
+      white-space: nowrap;
+      border: none;
+      cursor: pointer;
+      opacity: 0.95;
+    }
+    
+    .hover-actions button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      opacity: 1;
+    }
+    
+    /* Ensure button colors are preserved */
+    .hover-actions .bg-green-500 {
+      background-color: #10b981 !important;
+      color: white !important;
+    }
+    
+    .hover-actions .bg-orange-500 {
+      background-color: #f97316 !important;
+      color: white !important;
+    }
+    
+    .hover-actions .bg-red-500 {
+      background-color: #ef4444 !important;
+      color: white !important;
+    }
+    
+    .hover-actions .bg-green-500:hover {
+      background-color: #059669 !important;
+    }
+    
+    .hover-actions .bg-orange-500:hover {
+      background-color: #ea580c !important;
+    }
+    
+    .hover-actions .bg-red-500:hover {
+      background-color: #dc2626 !important;
+    }
   </style>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
@@ -62,12 +176,12 @@
     </div>
 
     <!-- Table -->
-    <div class="overflow-x-auto bg-white shadow rounded-lg">
+    <div class="overflow-x-auto bg-white shadow rounded-lg table-container">
       <table class="min-w-full text-sm text-left">
     <thead class="bg-gray-200">
           <tr>
             <th class="px-4 py-2">Time</th>
-      <th class="px-4 py-2">Hostname</th>
+            <th class="px-4 py-2">Hostname</th>
             <th class="px-4 py-2">Direction</th>
             <th class="px-4 py-2">Proto</th>
             <th class="px-4 py-2">Src</th>
@@ -75,7 +189,6 @@
             <th class="px-4 py-2">IN Iface</th>
             <th class="px-4 py-2">OUT Iface</th>
             <th class="px-4 py-2">Message</th>
-            <th class="px-4 py-2">Actions</th>
           </tr>
         </thead>
         <tbody id="logs-body"></tbody>
@@ -100,22 +213,36 @@ function renderActionButtons(row) {
   const host = row.hostname || '';
   const dstIp = row.dst_ip || '';
 
+  // Build buttons
+  const btns = [];
+  
   // Only IP known
   if (!host) {
-    return `<button class="unblock-ip-btn bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600" data-ip="${dstIp}">Unblock IP</button>`;
+    btns.push(`<button class="unblock-ip-btn bg-red-500 text-white px-2 py-1 rounded hover:bg-red-600" data-ip="${dstIp}">Unblock IP</button>`);
+  } else {
+    const cntManual = parseInt(row.cnt_manual_system_blocklists || 0);
+    // Always allow add to whitelist for hostnames
+    btns.push(`<button class="add-wl-btn bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600" data-host="${host}">+ Whitelist</button>`);
+    // Allow unblock hostname only if present in manual/system lists
+    if (cntManual > 0) {
+      btns.push(`<button class="unblock-host-btn bg-orange-500 text-white px-2 py-1 rounded hover:bg-orange-600" data-host="${host}">Unblock Host</button>`);
+    }
+    // Always provide Unblock IP as a fallback action
+    btns.push(`<button class="unblock-ip-btn bg-red-500 text-white px-2 py-1 rounded hover:bg-red-600" data-ip="${dstIp}" data-host="${host}">Unblock IP</button>`);
   }
-
-  const cntManual = parseInt(row.cnt_manual_system_blocklists || 0);
-  const btns = [];
-  // Always allow add to whitelist for hostnames
-  btns.push(`<button class="add-wl-btn bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600" data-host="${host}">Add to whitelist</button>`);
-  // Allow unblock hostname only if present in manual/system lists
-  if (cntManual > 0) {
-    btns.push(`<button class="unblock-host-btn bg-orange-500 text-white px-3 py-1 rounded hover:bg-orange-600" data-host="${host}">Unblock Hostname</button>`);
+  
+  // Build info text
+  let infoText = '';
+  if (host) {
+    infoText = `<span class="hostname">${host}</span><br><span class="ip">${dstIp}</span>`;
+  } else {
+    infoText = `<span class="ip">${dstIp}</span>`;
   }
-  // Always provide Unblock IP as a fallback action
-  btns.push(`<button class="unblock-ip-btn bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600" data-ip="${dstIp}" data-host="${host}">Unblock IP</button>`);
-  return btns.join(' ');
+  
+  return `
+    <div class="button-row">${btns.join('')}</div>
+    <div class="info-text">${infoText}</div>
+  `;
 }
 
 // Removed fetchHostnameMeta function as it is no longer needed
@@ -127,7 +254,7 @@ function renderRow(row) {
   const actions = renderActionButtons(row);
   return `
     <td class="px-4 py-2">${row.event_time}</td>
-  <td class="px-4 py-2">${row.hostname ? row.hostname : ''}</td>
+    <td class="px-4 py-2">${row.hostname ? row.hostname : ''}</td>
     <td class="px-4 py-2">${row.direction}</td>
     <td class="px-4 py-2">${row.proto || ''}</td>
     <td class="px-4 py-2">${src}</td>
@@ -135,7 +262,7 @@ function renderRow(row) {
     <td class="px-4 py-2">${row.iface_in || ''}</td>
     <td class="px-4 py-2">${row.iface_out || ''}</td>
     <td class="px-4 py-2 truncate-cell" title="${msg.replaceAll('\"','&quot;')}">${msg}</td>
-    <td class="px-4 py-2 actions-cell">${actions}</td>
+    <div class="hover-actions">${actions}</div>
   `;
 }
 
@@ -172,12 +299,16 @@ async function fetchBlocked(reset=false, prepend=false) {
         const fragment = document.createDocumentFragment();
         data.forEach(row => {
           const tr = document.createElement("tr");
+          tr.className = "table-row";
           tr.dataset.hostname = row.hostname || '';
           tr.dataset.row = JSON.stringify(row);
           tr.innerHTML = renderRow(row);
           tr.classList.add("new-row");
           fragment.appendChild(tr);
           setTimeout(() => tr.classList.remove("new-row"), 3000);
+          
+          // Add click event listeners for dynamic button positioning
+          addRowClickListeners(tr);
         });
         tbody.insertBefore(fragment, tbody.firstChild);
         if (!userAtTop) {
@@ -194,10 +325,14 @@ async function fetchBlocked(reset=false, prepend=false) {
       const fragment = document.createDocumentFragment();
       data.forEach(row => {
         const tr = document.createElement("tr");
+        tr.className = "table-row";
         tr.dataset.hostname = row.hostname || '';
         tr.dataset.row = JSON.stringify(row);
         tr.innerHTML = renderRow(row);
         fragment.appendChild(tr);
+        
+        // Add click event listeners for dynamic button positioning
+        addRowClickListeners(tr);
       });
       tbody.appendChild(fragment);
       if (data.length > 0) {
@@ -217,6 +352,80 @@ async function fetchBlocked(reset=false, prepend=false) {
     document.getElementById("loading").classList.add("hidden");
   }
 }
+
+// Function to add click event listeners for dynamic button positioning
+function addRowClickListeners(tr) {
+  tr.addEventListener('click', (e) => {
+    // Prevent triggering if clicking on a button
+    if (e.target.tagName === 'BUTTON') {
+      return;
+    }
+    
+    // Remove any existing active row and actions
+    const existingActiveRow = document.querySelector('.table-row.active');
+    const existingActions = document.querySelector('.hover-actions-active');
+    
+    if (existingActiveRow) {
+      existingActiveRow.classList.remove('active');
+    }
+    if (existingActions) {
+      existingActions.remove();
+    }
+    
+    // If clicking the same row that was already active, just close it
+    if (existingActiveRow === tr) {
+      return;
+    }
+    
+    // Mark this row as active
+    tr.classList.add('active');
+    
+    // Get the actions HTML from the row
+    const actionsDiv = tr.querySelector('.hover-actions');
+    if (actionsDiv) {
+      // Create a new floating action container
+      const floatingActions = document.createElement('div');
+      floatingActions.className = 'hover-actions hover-actions-active';
+      floatingActions.innerHTML = actionsDiv.innerHTML;
+      
+      // Position it relative to the row
+      const rowRect = tr.getBoundingClientRect();
+      
+      // Calculate position
+      const top = rowRect.top + (rowRect.height / 2);
+      const right = 20; // Fixed distance from right edge of viewport
+      
+      floatingActions.style.position = 'fixed';
+      floatingActions.style.top = top + 'px';
+      floatingActions.style.right = right + 'px';
+      floatingActions.style.transform = 'translateY(-50%)';
+      floatingActions.style.display = 'flex';
+      
+      document.body.appendChild(floatingActions);
+    }
+  });
+}
+
+// Close actions when clicking outside the table
+document.addEventListener('click', (e) => {
+  // Check if click is outside the table or on a non-row element
+  const tableContainer = document.querySelector('.table-container');
+  const clickedRow = e.target.closest('.table-row');
+  const clickedButton = e.target.closest('.hover-actions-active');
+  
+  // If clicking outside table and not on floating buttons, close actions
+  if (!tableContainer.contains(e.target) && !clickedButton) {
+    const activeRow = document.querySelector('.table-row.active');
+    const activeActions = document.querySelector('.hover-actions-active');
+    
+    if (activeRow) {
+      activeRow.classList.remove('active');
+    }
+    if (activeActions) {
+      activeActions.remove();
+    }
+  }
+});
 
 // Infinite scroll
 window.addEventListener("scroll", () => {
@@ -325,10 +534,27 @@ document.addEventListener('click', async (e) => {
   const unblockHostBtn = e.target.closest('.unblock-host-btn');
   const addWlBtn = e.target.closest('.add-wl-btn');
 
+  // Function to close the actions popup
+  const closeActionsPopup = () => {
+    const activeRow = document.querySelector('.table-row.active');
+    const activeActions = document.querySelector('.hover-actions-active');
+    
+    if (activeRow) {
+      activeRow.classList.remove('active');
+    }
+    if (activeActions) {
+      activeActions.remove();
+    }
+  };
+
   if (unblockIpBtn) {
     const ip = unblockIpBtn.dataset.ip;
     const host = unblockIpBtn.dataset.host || '';
     if (!ip) return;
+    
+    // Close popup immediately when button is clicked
+    closeActionsPopup();
+    
     unblockIpBtn.disabled = true;
     try {
       const res = await fetch('blocked_actions.php', {
@@ -354,6 +580,10 @@ document.addEventListener('click', async (e) => {
   if (unblockHostBtn) {
     const host = unblockHostBtn.dataset.host;
     if (!host) return;
+    
+    // Close popup immediately when button is clicked
+    closeActionsPopup();
+    
     unblockHostBtn.disabled = true;
     try {
       const res = await fetch('blocked_actions.php', {
@@ -379,6 +609,10 @@ document.addEventListener('click', async (e) => {
   if (addWlBtn) {
     const host = addWlBtn.dataset.host;
     if (!host) return;
+    
+    // Close popup immediately when button is clicked
+    closeActionsPopup();
+    
     addWlBtn.disabled = true;
     try {
       const res = await fetch('blocked_actions.php', {
