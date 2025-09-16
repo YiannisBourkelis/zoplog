@@ -152,6 +152,12 @@ async function fetchLogs(reset=false, prepend=false) {
 
   try {
     const res = await fetch("fetch_logs.php?" + params.toString());
+    
+    // Check if the response is successful
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    }
+    
     const data = await res.json();
 
     if (prepend) {
@@ -195,8 +201,14 @@ async function fetchLogs(reset=false, prepend=false) {
 
       offset += data.length;
     }
+
+    // Update last refresh indicator on successful data fetch
+    updateLastRefreshIndicator();
   } catch (e) {
     console.error("Fetch failed:", e);
+
+    // Show error indicator
+    updateLastRefreshIndicator(true);
   } finally {
     document.getElementById("loading").classList.add("hidden");
     
@@ -240,6 +252,36 @@ refreshSelect.addEventListener("change", e => {
 if (savedInterval && parseInt(savedInterval) > 0) {
   autoRefreshTimer = setInterval(() => fetchLogs(false, true), parseInt(savedInterval));
 }
+
+// Update last refresh time indicator
+function updateLastRefreshIndicator(isError = false) {
+  const timeIndicator = document.getElementById('last-refresh') || (() => {
+    const indicator = document.createElement('div');
+    indicator.id = 'last-refresh';
+    indicator.className = 'fixed top-4 right-4 bg-green-100 text-green-800 px-3 py-1 rounded-full text-xs font-medium shadow-lg z-50';
+    document.body.appendChild(indicator);
+    return indicator;
+  })();
+
+  const currentInterval = parseInt(refreshSelect.value);
+  const currentTime = new Date().toLocaleTimeString();
+
+  if (isError) {
+    timeIndicator.textContent = `Error • ${currentTime}`;
+    timeIndicator.className = 'fixed top-4 right-4 bg-red-100 text-red-800 px-3 py-1 rounded-full text-xs font-medium shadow-lg z-50';
+  } else if (currentInterval === 0) {
+    timeIndicator.textContent = `Manual • ${currentTime}`;
+    timeIndicator.className = 'fixed top-4 right-4 bg-gray-100 text-gray-800 px-3 py-1 rounded-full text-xs font-medium shadow-lg z-50';
+  } else {
+    timeIndicator.textContent = `Live • ${currentTime}`;
+    timeIndicator.className = 'fixed top-4 right-4 bg-green-100 text-green-800 px-3 py-1 rounded-full text-xs font-medium shadow-lg z-50';
+  }
+}
+
+// Listen for refresh interval changes to update indicator
+refreshSelect.addEventListener("change", () => {
+  updateLastRefreshIndicator();
+});
 
 // Filters
 document.getElementById("apply-filters").addEventListener("click", () => {
@@ -307,6 +349,11 @@ document.addEventListener('click', async (e) => {
         body: formData
       });
       
+      // Check if the response is successful
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      }
+      
       const data = await res.json();
       
       if (data.status === 'ok') {
@@ -349,6 +396,11 @@ async function updateBlockButtonStates() {
       body: formData
     });
     
+    // Check if the response is successful
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    }
+    
     const data = await res.json();
     
     if (data.status === 'ok' && data.blocked) {
@@ -370,6 +422,9 @@ async function updateBlockButtonStates() {
 
 // Initial load
 fetchLogs(true);
+
+// Initialize last refresh indicator
+updateLastRefreshIndicator();
 </script>
 
 </body>

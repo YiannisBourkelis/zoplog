@@ -158,6 +158,12 @@ async function fetchBlocked(reset=false, prepend=false) {
 
   try {
     const res = await fetch("fetch_blocked.php?" + params.toString());
+    
+    // Check if the response is successful
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    }
+    
     const data = await res.json();
 
     if (prepend) {
@@ -199,8 +205,14 @@ async function fetchBlocked(reset=false, prepend=false) {
       }
       offset += data.length;
     }
+
+    // Update last refresh indicator on successful data fetch
+    updateLastRefreshIndicator();
   } catch (e) {
     console.error("Fetch blocked failed:", e);
+
+    // Show error indicator
+    updateLastRefreshIndicator(true);
   } finally {
     document.getElementById("loading").classList.add("hidden");
   }
@@ -232,6 +244,36 @@ refreshSelect.addEventListener("change", e => {
 if (savedInterval && parseInt(savedInterval) > 0) {
   autoRefreshTimer = setInterval(() => fetchBlocked(false, true), parseInt(savedInterval));
 }
+
+// Update last refresh time indicator
+function updateLastRefreshIndicator(isError = false) {
+  const timeIndicator = document.getElementById('last-refresh') || (() => {
+    const indicator = document.createElement('div');
+    indicator.id = 'last-refresh';
+    indicator.className = 'fixed top-4 right-4 bg-green-100 text-green-800 px-3 py-1 rounded-full text-xs font-medium shadow-lg z-50';
+    document.body.appendChild(indicator);
+    return indicator;
+  })();
+
+  const currentInterval = parseInt(refreshSelect.value);
+  const currentTime = new Date().toLocaleTimeString();
+
+  if (isError) {
+    timeIndicator.textContent = `Error • ${currentTime}`;
+    timeIndicator.className = 'fixed top-4 right-4 bg-red-100 text-red-800 px-3 py-1 rounded-full text-xs font-medium shadow-lg z-50';
+  } else if (currentInterval === 0) {
+    timeIndicator.textContent = `Manual • ${currentTime}`;
+    timeIndicator.className = 'fixed top-4 right-4 bg-gray-100 text-gray-800 px-3 py-1 rounded-full text-xs font-medium shadow-lg z-50';
+  } else {
+    timeIndicator.textContent = `Live • ${currentTime}`;
+    timeIndicator.className = 'fixed top-4 right-4 bg-green-100 text-green-800 px-3 py-1 rounded-full text-xs font-medium shadow-lg z-50';
+  }
+}
+
+// Listen for refresh interval changes to update indicator
+refreshSelect.addEventListener("change", () => {
+  updateLastRefreshIndicator();
+});
 
 // Filters
 document.getElementById("apply-filters").addEventListener("click", () => {
@@ -274,6 +316,9 @@ document.getElementById("new-logs-banner").addEventListener("click", () => {
 // Initial load
 fetchBlocked(true);
 
+// Initialize last refresh indicator
+updateLastRefreshIndicator();
+
 // Delegate button actions
 document.addEventListener('click', async (e) => {
   const unblockIpBtn = e.target.closest('.unblock-ip-btn');
@@ -291,6 +336,12 @@ document.addEventListener('click', async (e) => {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({ action: 'unblock_ip', ip, hostname: host })
       });
+      
+      // Check if the response is successful
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      }
+      
       const json = await res.json();
       alert(json.message || (json.status === 'ok' ? 'IP unblocked.' : 'Failed to unblock IP'));
     } catch (err) {
@@ -310,6 +361,12 @@ document.addEventListener('click', async (e) => {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({ action: 'unblock_hostname', hostname: host })
       });
+      
+      // Check if the response is successful
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      }
+      
       const json = await res.json();
       alert(json.message || (json.status === 'ok' ? 'Hostname unblocked.' : 'Failed to unblock hostname'));
     } catch (err) {
@@ -329,6 +386,12 @@ document.addEventListener('click', async (e) => {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({ action: 'add_to_whitelist', hostname: host })
       });
+      
+      // Check if the response is successful
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      }
+      
       const json = await res.json();
       alert(json.message || (json.status === 'ok' ? 'Added to whitelist.' : 'Failed to add to whitelist'));
     } catch (err) {
