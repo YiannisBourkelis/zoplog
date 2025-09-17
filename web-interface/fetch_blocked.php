@@ -55,7 +55,7 @@ if ($since) {
     $types .= "ii";
 }
 
-// Build enriched query to group by IP and get all related hostnames (simplified and optimized)
+// Build ultra-fast optimized query
 $sql = "
 SELECT
     CASE
@@ -68,12 +68,12 @@ SELECT
         WHEN be.direction = 'IN' THEN src_ip.id
         ELSE dst_ip.id
     END AS primary_ip_id,
-    -- Get hostnames from a simple join with pre-filtered hostname data
-    COALESCE(hostname_data.all_hostnames, '') AS all_hostnames,
+    -- Collect all hostnames for this IP
+    COALESCE(GROUP_CONCAT(DISTINCT hn.hostname ORDER BY hn.hostname SEPARATOR '|'), '') AS all_hostnames,
     MAX(be.event_time) AS latest_event_time,
     COUNT(DISTINCT be.id) AS event_count,
-    
-    -- Get details from latest event using SUBSTRING_INDEX
+
+    -- Get details from latest event
     SUBSTRING_INDEX(GROUP_CONCAT(be.direction ORDER BY be.event_time DESC SEPARATOR '|'), '|', 1) AS latest_direction,
     SUBSTRING_INDEX(GROUP_CONCAT(UPPER(be.proto) ORDER BY be.event_time DESC SEPARATOR '|'), '|', 1) AS latest_proto,
     SUBSTRING_INDEX(GROUP_CONCAT(COALESCE(src_ip.ip_address, '') ORDER BY be.event_time DESC SEPARATOR '|'), '|', 1) AS latest_src_ip,
@@ -81,49 +81,42 @@ SELECT
     SUBSTRING_INDEX(GROUP_CONCAT(COALESCE(be.iface_in, '') ORDER BY be.event_time DESC SEPARATOR '|'), '|', 1) AS latest_iface_in,
     SUBSTRING_INDEX(GROUP_CONCAT(COALESCE(be.iface_out, '') ORDER BY be.event_time DESC SEPARATOR '|'), '|', 1) AS latest_iface_out,
     SUBSTRING_INDEX(GROUP_CONCAT(COALESCE(be.message, '') ORDER BY be.event_time DESC SEPARATOR '~'), '~', 1) AS latest_message,
-    
+
     0 AS cnt_url_blocklists,
     0 AS cnt_manual_system_blocklists
 FROM blocked_events be
 LEFT JOIN ip_addresses src_ip ON be.src_ip_id = src_ip.id
 LEFT JOIN ip_addresses dst_ip ON be.dst_ip_id = dst_ip.id
 LEFT JOIN (
-    -- Simple aggregation of hostnames by IP from recent logs
-    SELECT 
-        pl.src_ip_id AS ip_id,
-        GROUP_CONCAT(DISTINCT h.hostname ORDER BY h.hostname SEPARATOR '|') AS all_hostnames
-    FROM packet_logs pl
-    LEFT JOIN hostnames h ON pl.hostname_id = h.id
-    WHERE pl.hostname_id IS NOT NULL 
-    AND h.hostname IS NOT NULL
-    AND pl.src_ip_id IS NOT NULL
-    AND pl.packet_timestamp >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-    GROUP BY pl.src_ip_id
-    
-    UNION
-    
-    SELECT 
-        pl.dst_ip_id AS ip_id,
-        GROUP_CONCAT(DISTINCT h.hostname ORDER BY h.hostname SEPARATOR '|') AS all_hostnames
-    FROM packet_logs pl
-    LEFT JOIN hostnames h ON pl.hostname_id = h.id
-    WHERE pl.hostname_id IS NOT NULL 
-    AND h.hostname IS NOT NULL
-    AND pl.dst_ip_id IS NOT NULL
-    AND pl.packet_timestamp >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-    GROUP BY pl.dst_ip_id
-) AS hostname_data ON hostname_data.ip_id = CASE
+    SELECT DISTINCT ip_id, hostname
+    FROM (
+        SELECT pl.src_ip_id AS ip_id, h.hostname
+        FROM packet_logs pl
+        LEFT JOIN hostnames h ON pl.hostname_id = h.id
+        WHERE pl.src_ip_id IS NOT NULL
+        AND pl.hostname_id IS NOT NULL
+        AND h.hostname IS NOT NULL
+        AND pl.packet_timestamp >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+        UNION
+        SELECT pl.dst_ip_id AS ip_id, h.hostname
+        FROM packet_logs pl
+        LEFT JOIN hostnames h ON pl.hostname_id = h.id
+        WHERE pl.dst_ip_id IS NOT NULL
+        AND pl.hostname_id IS NOT NULL
+        AND h.hostname IS NOT NULL
+        AND pl.packet_timestamp >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+    ) AS hostname_data
+    LIMIT 10000
+) AS hn ON hn.ip_id = CASE
     WHEN be.direction = 'OUT' THEN dst_ip.id
     WHEN be.direction = 'IN' THEN src_ip.id
     ELSE dst_ip.id
 END
 $where_sql
-GROUP BY primary_ip, primary_ip_id, hostname_data.all_hostnames
+GROUP BY primary_ip, primary_ip_id
 ORDER BY latest_event_time $order
 $limit_sql
-";
-
-$stmt = $mysqli->prepare($sql);
+";$stmt = $mysqli->prepare($sql);
 if (!$stmt) {
     http_response_code(500);
     echo json_encode(["error" => $mysqli->error]);
