@@ -758,7 +758,7 @@ async function fetchBlocked(reset=false, prepend=false) {
   }
 
   try {
-    const res = await fetch("fetch_blocked.php?" + params.toString());
+    const res = await fetch("fetch_blocked_experiment.php?" + params.toString());
     
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}: ${res.statusText}`);
