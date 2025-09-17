@@ -70,6 +70,26 @@
       line-height: 1.2;
     }
     
+    .domain-list {
+      max-height: 150px;
+      overflow-y: auto;
+      border: 1px solid #e2e8f0;
+      border-radius: 4px;
+      background: #f8fafc;
+      margin: 4px 0;
+    }
+    
+    .domain-item {
+      padding: 4px 8px;
+      font-size: 12px;
+      border-bottom: 1px solid #e2e8f0;
+      color: #475569;
+    }
+    
+    .domain-item:last-child {
+      border-bottom: none;
+    }
+    
     .hover-actions .info-text .hostname {
       font-weight: 600;
       color: #475569;
@@ -123,6 +143,131 @@
     
     .hover-actions .bg-red-500:hover {
       background-color: #dc2626 !important;
+    }
+    
+    /* Tree-like structure styling */
+    .parent-row {
+      font-weight: normal;
+    }
+    
+    .child-row {
+      background-color: #f8fafc;
+      border-left: 3px solid #e2e8f0;
+    }
+    
+    .child-row.hidden {
+      display: none;
+    }
+    
+    .hostname-cell {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .expand-toggle {
+      cursor: pointer;
+      color: #64748b;
+      font-size: 12px;
+      user-select: none;
+      transition: transform 0.2s ease;
+      min-width: 16px;
+    }
+    
+    .expand-toggle:hover {
+      color: #475569;
+    }
+    
+    .expand-toggle.expanded {
+      transform: rotate(90deg);
+    }
+    
+    .child-hostname {
+      padding-left: 24px;
+      color: #64748b;
+      font-style: italic;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    
+    .tree-line {
+      color: #cbd5e1;
+      font-family: monospace;
+    }
+    
+    /* Time column styling */
+    .time-column {
+      font-weight: normal;
+      padding-left: 8px; /* Reduced since arrow is now inside */
+      min-width: 120px;
+    }
+    
+    .time-cell-with-arrow {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    
+    .time-arrow {
+      cursor: pointer;
+      color: #64748b;
+      font-size: 12px;
+      user-select: none;
+      transition: transform 0.2s ease;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    
+    .time-arrow:hover {
+      color: #475569;
+    }
+    
+    .time-arrow.expanded {
+      transform: rotate(90deg);
+    }
+    
+    .time-arrow-spacer {
+      width: 16px;
+      flex-shrink: 0;
+    }
+    
+    .time-cell {
+      display: flex;
+      flex-direction: column;
+      line-height: 1.2;
+      flex-grow: 1;
+    }
+    
+    .date-line {
+      font-size: 12px;
+      color: #475569;
+      font-weight: normal;
+    }
+    
+    .time-line {
+      font-size: 11px;
+      color: #64748b;
+      font-weight: normal;
+      margin-top: 2px;
+    }
+    
+    /* Make all table text normal weight */
+    table.min-w-full tr {
+      font-weight: normal;
+    }
+    
+    table.min-w-full tr td {
+      font-weight: normal;
+    }
+    
+    table.min-w-full tr th {
+      font-weight: normal;
+    }
+    
+    /* Smooth transitions for expand/collapse */
+    .child-row {
+      transition: all 0.2s ease;
     }
   </style>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -203,46 +348,375 @@
   </div>
 
 <script>
+// JavaScript variables
 let offset = 0;
 let autoRefreshTimer = null;
 let latestTimestamp = null;
 let filters = { ip: "", direction: "", proto: "", iface: "" };
 let userAtTop = true;
 
-function renderActionButtons(row) {
-  const host = row.hostname || '';
-  const dstIp = row.dst_ip || '';
+// Global function to format event time
+function formatEventTime(timestamp) {
+  if (!timestamp || timestamp === 'N/A') return 'N/A';
+  try {
+    const date = new Date(timestamp);
+    const dateStr = date.toLocaleDateString();
+    const timeStr = date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+    return `<div class="time-cell">
+              <div class="date-line">${dateStr}</div>
+              <div class="time-line">${timeStr}</div>
+            </div>`;
+  } catch (e) {
+    return timestamp;
+  }
+}
 
-  // Build buttons
+function renderActionButtons(row, hostnames = [], isParent = false) {
+  const primaryIp = row.primary_ip || '';
+  
+  // Build buttons based on whether it's parent or child row
   const btns = [];
   
-  // Only IP known
-  if (!host) {
-    btns.push(`<button class="unblock-ip-btn bg-red-500 text-white px-2 py-1 rounded hover:bg-red-600" data-ip="${dstIp}">Unblock IP</button>`);
-  } else {
-    const cntManual = parseInt(row.cnt_manual_system_blocklists || 0);
-    // Always allow add to whitelist for hostnames
-    btns.push(`<button class="add-wl-btn bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600" data-host="${host}">+ Whitelist</button>`);
-    // Allow unblock hostname only if present in manual/system lists
-    if (cntManual > 0) {
-      btns.push(`<button class="unblock-host-btn bg-orange-500 text-white px-2 py-1 rounded hover:bg-orange-600" data-host="${host}">Unblock Host</button>`);
-    }
-    // Always provide Unblock IP as a fallback action
-    btns.push(`<button class="unblock-ip-btn bg-red-500 text-white px-2 py-1 rounded hover:bg-red-600" data-ip="${dstIp}" data-host="${host}">Unblock IP</button>`);
+  if (isParent && hostnames.length > 1) {
+    // Parent row with multiple hostnames
+    btns.push(`<button class="add-wl-btn bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600 text-xs" data-hosts='${JSON.stringify(hostnames)}'>+ WL All (${hostnames.length})</button>`);
+    btns.push(`<button class="add-wl-btn bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600 text-xs" data-host="${hostnames[0]}">+ WL First</button>`);
+  } else if (isParent && hostnames.length === 1) {
+    // Parent row with single hostname
+    btns.push(`<button class="add-wl-btn bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600 text-xs" data-host="${hostnames[0]}">+ Whitelist</button>`);
+  } else if (!isParent && hostnames.length === 1) {
+    // Child row with individual hostname
+    const hostname = hostnames[0];
+    btns.push(`<button class="add-wl-btn bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600 text-xs" data-host="${hostname}">+ WL</button>`);
   }
   
-  // Build info text
-  let infoText = '';
-  if (host) {
-    infoText = `<span class="hostname">${host}</span><br><span class="ip">${dstIp}</span>`;
-  } else {
-    infoText = `<span class="ip">${dstIp}</span>`;
-  }
+  // Always add unblock IP option
+  btns.push(`<button class="unblock-ip-btn bg-red-500 text-white px-2 py-1 rounded hover:bg-red-600 text-xs" data-ip="${primaryIp}">Unblock IP</button>`);
+  
+  const infoText = `IP: ${primaryIp}${hostnames.length > 0 ? ` | ${hostnames.join(', ')}` : ''}`;
   
   return `
     <div class="button-row">${btns.join('')}</div>
     <div class="info-text">${infoText}</div>
   `;
+}
+
+function renderRow(row) {
+  console.log("renderRow called with:", row);
+  
+  // Parse hostnames
+  const allHostnames = (row.all_hostnames && row.all_hostnames.trim() !== '') ? row.all_hostnames.split('|') : [];
+  const primaryHostname = allHostnames.length > 0 ? allHostnames[0] : 'No hostname';
+  
+  // Use the latest event details with fallbacks
+  const eventTime = row.latest_event_time || 'N/A';
+  const direction = row.latest_direction || 'N/A';
+  const proto = row.latest_proto || 'N/A';
+  const srcIp = row.latest_src_ip || 'N/A';
+  const dstIp = row.latest_dst_ip || 'N/A';
+  const ifaceIn = row.latest_iface_in || '';
+  const ifaceOut = row.latest_iface_out || '';
+  const message = row.latest_message || '';
+  
+  // Format the event time to show date and time on separate lines
+  const formattedTime = formatEventTime(eventTime);
+  const hostnameDisplay = allHostnames.length > 1 ? 
+    `<div class="hostname-cell">
+       ${primaryHostname} <span class="text-xs text-gray-500">(+${allHostnames.length - 1} more)</span>
+     </div>` : 
+    primaryHostname;
+  
+  // Create time display with tree arrow on the left
+  const timeDisplay = allHostnames.length > 1 ? 
+    `<div class="time-cell-with-arrow">
+       <span class="expand-toggle time-arrow" onclick="toggleChildren('${row.primary_ip}')">▶</span>
+       ${formattedTime}
+     </div>` : 
+    `<div class="time-cell-with-arrow">
+       <span class="time-arrow-spacer"></span>
+       ${formattedTime}
+     </div>`;
+  
+  const actions = renderActionButtons(row, allHostnames, true);
+  
+  return `
+    <td class="px-4 py-2 time-column">${timeDisplay}</td>
+    <td class="px-4 py-2">${hostnameDisplay}</td>
+    <td class="px-4 py-2">${direction}</td>
+    <td class="px-4 py-2">${proto}</td>
+    <td class="px-4 py-2">${srcIp}</td>
+    <td class="px-4 py-2">${dstIp}</td>
+    <td class="px-4 py-2">${ifaceIn}</td>
+    <td class="px-4 py-2">${ifaceOut}</td>
+    <td class="px-4 py-2 truncate-cell" title="${message.replace(/"/g, '&quot;')}">${message}</td>
+    <div class="hover-actions">${actions}</div>
+  `;
+}
+
+// Function to create child rows for hostnames
+function createChildRows(row, allHostnames) {
+  const childHostnames = allHostnames.slice(1); // Skip first hostname (already shown in parent)
+  let childRowsHtml = '';
+  
+  childHostnames.forEach((hostname, index) => {
+    const isLast = index === childHostnames.length - 1;
+    const treeSymbol = isLast ? '└─' : '├─';
+    const actions = renderActionButtons(row, [hostname], false);
+    
+    childRowsHtml += `
+      <tr class="child-row hidden" data-parent-ip="${row.primary_ip}">
+        <td class="px-4 py-2 time-column">
+          <div class="time-cell-with-arrow">
+            <span class="time-arrow-spacer"></span>
+          </div>
+        </td>
+        <td class="px-4 py-2">
+          <div class="child-hostname">
+            <span class="tree-line">${treeSymbol}</span>
+            ${hostname}
+          </div>
+        </td>
+        <td class="px-4 py-2"></td>
+        <td class="px-4 py-2"></td>
+        <td class="px-4 py-2"></td>
+        <td class="px-4 py-2"></td>
+        <td class="px-4 py-2"></td>
+        <td class="px-4 py-2"></td>
+        <td class="px-4 py-2"></td>
+        <div class="hover-actions">${actions}</div>
+      </tr>
+    `;
+  });
+  
+  return childRowsHtml;
+}
+
+// Helper function to escape IP address for CSS class names
+function escapeIpForClass(ip) {
+  return ip.replace(/\./g, '-');
+}
+
+// Function to add hostname(s) to whitelist
+async function addToWhitelist(uniqueId, hostname, displayName) {
+  try {
+    // For "all domains" actions, hostname might be a comma-separated list
+    const hostnames = hostname.includes(',') ? hostname.split(',').map(h => h.trim()) : [hostname];
+    
+    // Process each hostname
+    for (const host of hostnames) {
+      const res = await fetch('blocked_actions.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ action: 'add_to_whitelist', hostname: host })
+      });
+      
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      }
+      
+      const json = await res.json();
+      
+      if (json.status !== 'ok') {
+        throw new Error(json.message || `Failed to whitelist ${host}`);
+      }
+    }
+    
+    // Close any open popup
+    const activeActions = document.querySelector('.hover-actions-active');
+    if (activeActions) {
+      activeActions.remove();
+    }
+    const activeRow = document.querySelector('.table-row.active');
+    if (activeRow) {
+      activeRow.classList.remove('active');
+    }
+    
+    // Show success message
+    if (hostnames.length > 1) {
+      showTemporaryMessage(`✓ Successfully added ${hostnames.length} domains to whitelist.`, 'success');
+    } else {
+      showTemporaryMessage(`✓ Successfully added "${displayName}" to whitelist.`, 'success');
+    }
+    
+    // Mark rows as whitelisted instead of removing them
+    if (uniqueId.startsWith('all-ip-')) {
+      // Mark all rows for this IP as whitelisted
+      const ip = uniqueId.replace('all-ip-', '');
+      const escapedIp = escapeIpForClass(ip);
+      const parentRow = document.querySelector(`tr[data-ip="${ip}"]`);
+      const childRows = document.querySelectorAll(`tr.child-row-${escapedIp}`);
+      
+      if (parentRow) {
+        markRowAsWhitelisted(parentRow);
+      }
+      childRows.forEach(row => {
+        markRowAsWhitelisted(row);
+      });
+    } else {
+      // Mark single domain row as whitelisted
+      const targetRow = document.querySelector(`tr[onclick*="${uniqueId}"]`) || 
+                        document.querySelector(`button[onclick*="${uniqueId}"]`)?.closest('tr');
+      if (targetRow) {
+        markRowAsWhitelisted(targetRow);
+      }
+    }
+  } catch (err) {
+    console.error('Error adding to whitelist:', err);
+    showTemporaryMessage(`Error: ${err.message}`, 'error');
+  }
+}
+
+// Function to unblock IP address
+async function unblockIP(ipAddress) {
+  try {
+    const res = await fetch('blocked_actions.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ action: 'unblock_ip', ip: ipAddress })
+    });
+    
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    }
+    
+    const json = await res.json();
+    
+    if (json.status === 'ok') {
+      // Close any open popup
+      const activeActions = document.querySelector('.hover-actions-active');
+      if (activeActions) {
+        activeActions.remove();
+      }
+      const activeRow = document.querySelector('.table-row.active');
+      if (activeRow) {
+        activeRow.classList.remove('active');
+      }
+      
+      // Show success message
+      showTemporaryMessage(`✓ Successfully unblocked IP "${ipAddress}".`, 'success');
+      
+      // Mark all rows for this IP as unblocked instead of removing them
+      const escapedIp = escapeIpForClass(ipAddress);
+      const parentRow = document.querySelector(`tr[data-ip="${ipAddress}"]`);
+      const childRows = document.querySelectorAll(`tr.child-row-${escapedIp}`);
+      
+      if (parentRow) {
+        markRowAsUnblocked(parentRow);
+      }
+      childRows.forEach(row => {
+        markRowAsUnblocked(row);
+      });
+    } else {
+      showTemporaryMessage(json.message || 'Failed to unblock IP.', 'error');
+    }
+  } catch (err) {
+    console.error('Error unblocking IP:', err);
+    showTemporaryMessage('Network error while unblocking IP.', 'error');
+  }
+}
+
+// Function to mark a row as whitelisted
+function markRowAsWhitelisted(row) {
+  row.style.backgroundColor = '#f0f9ff';
+  row.style.borderLeft = '4px solid #10b981';
+  row.style.opacity = '0.8';
+  
+  // Add a visual indicator in the first cell
+  const firstCell = row.querySelector('td');
+  if (firstCell && !firstCell.querySelector('.status-indicator')) {
+    const indicator = document.createElement('span');
+    indicator.className = 'status-indicator';
+    indicator.innerHTML = '✓ WHITELISTED';
+    indicator.style.cssText = 'background: #10b981; color: white; font-size: 10px; padding: 2px 6px; border-radius: 4px; margin-left: 8px; font-weight: bold;';
+    firstCell.appendChild(indicator);
+  }
+  
+  // Disable action buttons in this row
+  const buttons = row.querySelectorAll('button');
+  buttons.forEach(btn => {
+    btn.disabled = true;
+    btn.style.opacity = '0.5';
+  });
+}
+
+// Function to mark a row as unblocked
+function markRowAsUnblocked(row) {
+  row.style.backgroundColor = '#fef3c7';
+  row.style.borderLeft = '4px solid #f59e0b';
+  row.style.opacity = '0.8';
+  
+  // Add a visual indicator in the first cell
+  const firstCell = row.querySelector('td');
+  if (firstCell && !firstCell.querySelector('.status-indicator')) {
+    const indicator = document.createElement('span');
+    indicator.className = 'status-indicator';
+    indicator.innerHTML = '⚠ UNBLOCKED';
+    indicator.style.cssText = 'background: #f59e0b; color: white; font-size: 10px; padding: 2px 6px; border-radius: 4px; margin-left: 8px; font-weight: bold;';
+    firstCell.appendChild(indicator);
+  }
+  
+  // Disable action buttons in this row
+  const buttons = row.querySelectorAll('button');
+  buttons.forEach(btn => {
+    btn.disabled = true;
+    btn.style.opacity = '0.5';
+  });
+}
+
+// Function to show temporary success/error messages
+function showTemporaryMessage(message, type = 'success') {
+  // Remove any existing message
+  const existingMessage = document.getElementById('temp-message');
+  if (existingMessage) {
+    existingMessage.remove();
+  }
+  
+  // Create new message element
+  const messageDiv = document.createElement('div');
+  messageDiv.id = 'temp-message';
+  messageDiv.className = `fixed top-4 right-4 px-4 py-2 rounded-lg shadow-lg z-50 transition-opacity duration-300 ${
+    type === 'success' 
+      ? 'bg-green-500 text-white' 
+      : 'bg-red-500 text-white'
+  }`;
+  messageDiv.textContent = message;
+  
+  // Add to page
+  document.body.appendChild(messageDiv);
+  
+  // Auto-hide after 3 seconds
+  setTimeout(() => {
+    messageDiv.style.opacity = '0';
+    setTimeout(() => messageDiv.remove(), 300);
+  }, 3000);
+}
+
+// Function to toggle child rows visibility
+function toggleChildren(toggleElement, parentIp) {
+  console.log("toggleChildren called with:", toggleElement, parentIp);
+  
+  // Prevent the click from bubbling up to the row click handler
+  if (event) {
+    event.stopPropagation();
+  }
+  
+  const escapedIp = escapeIpForClass(parentIp);
+  const childRows = document.querySelectorAll(`tr.child-row-${escapedIp}`);
+  console.log("Escaped IP:", escapedIp);
+  console.log("Found child rows:", childRows.length, childRows);
+  
+  const isExpanded = toggleElement.classList.contains('expanded');
+  console.log("Is expanded:", isExpanded);
+  
+  if (isExpanded) {
+    // Collapse
+    toggleElement.classList.remove('expanded');
+    childRows.forEach(row => row.style.display = 'none');
+  } else {
+    // Expand
+    toggleElement.classList.add('expanded');
+    childRows.forEach(row => row.style.display = '');
+  }
 }
 
 // Removed fetchHostnameMeta function as it is no longer needed
@@ -286,7 +760,6 @@ async function fetchBlocked(reset=false, prepend=false) {
   try {
     const res = await fetch("fetch_blocked.php?" + params.toString());
     
-    // Check if the response is successful
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}: ${res.statusText}`);
     }
@@ -295,21 +768,83 @@ async function fetchBlocked(reset=false, prepend=false) {
 
     if (prepend) {
       if (data.length > 0) {
-        latestTimestamp = data[data.length - 1].event_time;
+        latestTimestamp = data[data.length - 1].latest_event_time;
         const fragment = document.createDocumentFragment();
+        
         data.forEach(row => {
+          const allHostnames = (row.all_hostnames && row.all_hostnames.trim() !== '') ? row.all_hostnames.split('|') : [];
+          const escapedIp = escapeIpForClass(row.primary_ip);
+          
+          // Create parent row
           const tr = document.createElement("tr");
-          tr.className = "table-row";
-          tr.dataset.hostname = row.hostname || '';
+          tr.className = "table-row parent-row";
+          tr.dataset.ip = row.primary_ip;
+          tr.dataset.allHostnames = JSON.stringify(allHostnames);
           tr.dataset.row = JSON.stringify(row);
-          tr.innerHTML = renderRow(row);
+          
+          // Use simple innerHTML for parent row
+          tr.innerHTML = `
+            <td class="time-column">
+              <div class="time-cell-with-arrow">
+                ${allHostnames.length > 1 ? 
+                  `<span class="expand-toggle time-arrow" onclick="toggleChildren(this, '${row.primary_ip}')">▶</span>` : 
+                  '<span class="time-arrow-spacer"></span>'
+                }
+                ${formatEventTime(row.latest_event_time || '')}
+              </div>
+            </td>
+            <td>${allHostnames.length > 0 ? allHostnames[0] : row.primary_ip}${allHostnames.length > 1 ? ` (+${allHostnames.length - 1} more)` : ''}</td>
+            <td>${row.latest_direction || ''}</td>
+            <td>${row.latest_proto || ''}</td>
+            <td>${row.latest_src_ip || ''}</td>
+            <td>${row.latest_dst_ip || ''}</td>
+            <td>${row.latest_iface_in || ''}</td>
+            <td>${row.latest_iface_out || ''}</td>
+            <td class="message-cell">${(row.latest_message || '').replace(/"/g, '&quot;').substring(0, 100)}${(row.latest_message || '').length > 100 ? '...' : ''}</td>
+            <td>
+              <div class="hover-actions" style="display: none;">
+                <button onclick="addToWhitelist('all-ip-${row.primary_ip}', '${allHostnames.join(', ')}', '${allHostnames.join(', ')}')" class="whitelist-btn">Whitelist All Domains (${allHostnames.length})</button>
+                <div class="domain-list">
+                  ${allHostnames.map(h => `<div class="domain-item">${h}</div>`).join('')}
+                </div>
+                <button onclick="unblockIP('${row.primary_ip}')" class="unblock-btn">Unblock IP</button>
+              </div>
+            </td>
+          `;
+          
           tr.classList.add("new-row");
           fragment.appendChild(tr);
           setTimeout(() => tr.classList.remove("new-row"), 3000);
           
           // Add click event listeners for dynamic button positioning
           addRowClickListeners(tr);
+          
+          // Create child rows if there are multiple hostnames
+          if (allHostnames.length > 1) {
+            allHostnames.slice(1).forEach((hostname, index) => {
+              const childTr = document.createElement("tr");
+              childTr.className = `child-row child-row-${escapedIp} table-row`;
+              childTr.style.display = "none";
+              childTr.innerHTML = `
+                <td style="padding-left: 40px;">${index === allHostnames.length - 2 ? '└─' : '├─'} ${hostname}</td>
+                <td colspan="8"></td>
+                <td>
+                  <div class="hover-actions" style="display: none;">
+                    <button onclick="addToWhitelist('single-${hostname}', '${hostname}', '${hostname}')" class="whitelist-btn">Whitelist "${hostname}"</button>
+                    <button onclick="unblockIP('${row.primary_ip}')" class="unblock-btn">Unblock IP</button>
+                  </div>
+                </td>
+              `;
+              childTr.classList.add("new-row");
+              fragment.appendChild(childTr);
+              setTimeout(() => childTr.classList.remove("new-row"), 3000);
+              
+              // Add click listener for child rows
+              addRowClickListeners(childTr);
+            });
+          }
         });
+        
         tbody.insertBefore(fragment, tbody.firstChild);
         if (!userAtTop) {
           document.getElementById("new-logs-banner").classList.remove("hidden");
@@ -322,31 +857,88 @@ async function fetchBlocked(reset=false, prepend=false) {
         tbody.innerHTML = "";
         offset = 0;
       }
+      
       const fragment = document.createDocumentFragment();
       data.forEach(row => {
+        const allHostnames = (row.all_hostnames && row.all_hostnames.trim() !== '') ? row.all_hostnames.split('|') : [];
+        const escapedIp = escapeIpForClass(row.primary_ip);
+        
+        // Create parent row
         const tr = document.createElement("tr");
-        tr.className = "table-row";
-        tr.dataset.hostname = row.hostname || '';
+        tr.className = "table-row parent-row";
+        tr.dataset.ip = row.primary_ip;
+        tr.dataset.allHostnames = JSON.stringify(allHostnames);
         tr.dataset.row = JSON.stringify(row);
-        tr.innerHTML = renderRow(row);
+        
+        // Use simple innerHTML for parent row
+        tr.innerHTML = `
+          <td class="time-column">
+            <div class="time-cell-with-arrow">
+              ${allHostnames.length > 1 ? 
+                `<span class="expand-toggle time-arrow" onclick="toggleChildren(this, '${row.primary_ip}')">▶</span>` : 
+                '<span class="time-arrow-spacer"></span>'
+              }
+              ${formatEventTime(row.latest_event_time || '')}
+            </div>
+          </td>
+          <td>${allHostnames.length > 0 ? allHostnames[0] : row.primary_ip}${allHostnames.length > 1 ? ` (+${allHostnames.length - 1} more)` : ''}</td>
+          <td>${row.latest_direction || ''}</td>
+          <td>${row.latest_proto || ''}</td>
+          <td>${row.latest_src_ip || ''}</td>
+          <td>${row.latest_dst_ip || ''}</td>
+          <td>${row.latest_iface_in || ''}</td>
+          <td>${row.latest_iface_out || ''}</td>
+          <td class="message-cell">${(row.latest_message || '').replace(/"/g, '&quot;').substring(0, 100)}${(row.latest_message || '').length > 100 ? '...' : ''}</td>
+          <td>
+            <div class="hover-actions" style="display: none;">
+              <button onclick="addToWhitelist('all-ip-${row.primary_ip}', '${allHostnames.join(', ')}', '${allHostnames.join(', ')}')" class="whitelist-btn">Whitelist All Domains (${allHostnames.length})</button>
+              <div class="domain-list">
+                ${allHostnames.map(h => `<div class="domain-item">${h}</div>`).join('')}
+              </div>
+              <button onclick="unblockIP('${row.primary_ip}')" class="unblock-btn">Unblock IP</button>
+            </div>
+          </td>
+        `;
+        
         fragment.appendChild(tr);
         
         // Add click event listeners for dynamic button positioning
         addRowClickListeners(tr);
+        
+        // Create child rows if there are multiple hostnames
+        if (allHostnames.length > 1) {
+          allHostnames.slice(1).forEach((hostname, index) => {
+            const childTr = document.createElement("tr");
+            childTr.className = `child-row child-row-${escapedIp} table-row`;
+            childTr.style.display = "none";
+            childTr.innerHTML = `
+              <td style="padding-left: 40px;">${index === allHostnames.length - 2 ? '└─' : '├─'} ${hostname}</td>
+              <td colspan="8"></td>
+              <td>
+                <div class="hover-actions" style="display: none;">
+                  <button onclick="addToWhitelist('single-${hostname}', '${hostname}', '${hostname}')" class="whitelist-btn">Whitelist "${hostname}"</button>
+                  <button onclick="unblockIP('${row.primary_ip}')" class="unblock-btn">Unblock IP</button>
+                </div>
+              </td>
+            `;
+            fragment.appendChild(childTr);
+            
+            // Add click listener for child rows
+            addRowClickListeners(childTr);
+          });
+        }
       });
+      
       tbody.appendChild(fragment);
       if (data.length > 0) {
-        latestTimestamp = data[0].event_time;
+        latestTimestamp = data[0].latest_event_time;
       }
       offset += data.length;
     }
 
-    // Update last refresh indicator on successful data fetch
     updateLastRefreshIndicator();
   } catch (e) {
     console.error("Fetch blocked failed:", e);
-
-    // Show error indicator
     updateLastRefreshIndicator(true);
   } finally {
     document.getElementById("loading").classList.add("hidden");
@@ -356,8 +948,8 @@ async function fetchBlocked(reset=false, prepend=false) {
 // Function to add click event listeners for dynamic button positioning
 function addRowClickListeners(tr) {
   tr.addEventListener('click', (e) => {
-    // Prevent triggering if clicking on a button
-    if (e.target.tagName === 'BUTTON') {
+    // Prevent triggering if clicking on a button or expand toggle
+    if (e.target.tagName === 'BUTTON' || e.target.classList.contains('expand-toggle')) {
       return;
     }
     
