@@ -1105,8 +1105,25 @@ function updateLastRefreshIndicator(isError = false) {
   }
 }
 
-// Listen for refresh interval changes to update indicator
+// Listen for refresh interval changes
 refreshSelect.addEventListener("change", () => {
+  const newInterval = parseInt(refreshSelect.value);
+  
+  // Clear existing timer
+  if (autoRefreshTimer) {
+    clearInterval(autoRefreshTimer);
+    autoRefreshTimer = null;
+  }
+  
+  // Save to localStorage
+  localStorage.setItem("blocked-refresh-interval", newInterval);
+  
+  // Set up new timer if interval > 0
+  if (newInterval > 0) {
+    autoRefreshTimer = setInterval(() => fetchBlocked(false, true), newInterval);
+  }
+  
+  // Update indicator
   updateLastRefreshIndicator();
 });
 
