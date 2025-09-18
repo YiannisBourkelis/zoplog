@@ -439,7 +439,7 @@ $systemTimeline = [
       <table id="topHostsTable" class="min-w-full text-sm text-left hidden">
         <thead class="bg-gray-200">
           <tr>
-            <th class="px-4 py-2">Hostname</th>
+            <th class="px-4 py-2">Domain</th>
             <th class="px-4 py-2">Requests</th>
           </tr>
         </thead>
@@ -853,7 +853,7 @@ async function loadTopHosts() {
     if (topHostsTable && data) {
       topHostsTable.innerHTML = data.slice(0, 5).map(host => 
         `<tr>
-          <td class="px-4 py-2">${host.hostname}</td>
+          <td class="px-4 py-2">${host.domain}</td>
           <td class="px-4 py-2">${host.cnt.toLocaleString()}</td>
         </tr>`
       ).join('');
@@ -865,7 +865,7 @@ async function loadTopHosts() {
     if (topHosts30List && data) {
       topHosts30List.innerHTML = data.slice(0, 200).map(host => 
         `<li class="flex justify-between items-center py-1">
-          <span class="text-gray-800">${host.hostname}</span>
+          <span class="text-gray-800">${host.domain}</span>
           <span class="text-gray-600 font-medium">${host.cnt.toLocaleString()}</span>
         </li>`
       ).join('');
@@ -877,7 +877,7 @@ async function loadTopHosts() {
     if (topHosts365List && data) {
       topHosts365List.innerHTML = data.slice(0, 200).map(host => 
         `<li class="flex justify-between items-center py-1">
-          <span class="text-gray-800">${host.hostname}</span>
+          <span class="text-gray-800">${host.domain}</span>
           <span class="text-gray-600 font-medium">${host.cnt.toLocaleString()}</span>
         </li>`
       ).join('');
@@ -1345,7 +1345,7 @@ async function updateChartsRealtime() {
       if (topHostsTable) {
         topHostsTable.innerHTML = data.top_hosts.map(host => `
           <tr>
-            <td class="px-4 py-2">${host.hostname}</td>
+            <td class="px-4 py-2">${host.domain}</td>
             <td class="px-4 py-2">${host.cnt.toLocaleString()}</td>
           </tr>
         `).join('');

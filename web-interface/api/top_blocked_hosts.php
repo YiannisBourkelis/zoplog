@@ -5,7 +5,7 @@ require_once __DIR__ . '/../zoplog_config.php';
 // Top 200 blocked hosts (30 days) - optimized with normalization
 $topBlocked30 = $mysqli->query("
     SELECT
-        COALESCE(h.hostname, dst_ip.ip_address, 'Unknown') as blocked_host,
+        COALESCE(d.domain, dst_ip.ip_address, 'Unknown') as blocked_host,
         COUNT(DISTINCT CONCAT(
             COALESCE(be.src_ip_id, ''), '-',
             COALESCE(be.dst_ip_id, ''), '-',
@@ -23,8 +23,9 @@ $topBlocked30 = $mysqli->query("
         WHERE event_time >= NOW() - INTERVAL 30 DAY
     ) be
     LEFT JOIN ip_addresses dst_ip ON be.dst_ip_id = dst_ip.id
-    LEFT JOIN hostnames h ON h.ip_id = dst_ip.id
-    GROUP BY COALESCE(h.hostname, dst_ip.ip_address)
+    LEFT JOIN domain_ip_addresses dip ON dip.ip_address_id = dst_ip.id
+    LEFT JOIN domains d ON d.id = dip.domain_id
+    GROUP BY COALESCE(d.domain, dst_ip.ip_address)
     ORDER BY cnt DESC
     LIMIT 200
 ");
@@ -37,7 +38,7 @@ while ($row = $topBlocked30->fetch_assoc()) {
 // Top 200 blocked hosts (365 days) - optimized with normalization
 $topBlocked365 = $mysqli->query("
     SELECT
-        COALESCE(h.hostname, dst_ip.ip_address, 'Unknown') as blocked_host,
+        COALESCE(d.domain, dst_ip.ip_address, 'Unknown') as blocked_host,
         COUNT(DISTINCT CONCAT(
             COALESCE(be.src_ip_id, ''), '-',
             COALESCE(be.dst_ip_id, ''), '-',
@@ -54,8 +55,9 @@ $topBlocked365 = $mysqli->query("
         WHERE event_time >= NOW() - INTERVAL 365 DAY
     ) be
     LEFT JOIN ip_addresses dst_ip ON be.dst_ip_id = dst_ip.id
-    LEFT JOIN hostnames h ON h.ip_id = dst_ip.id
-    GROUP BY COALESCE(h.hostname, dst_ip.ip_address)
+    LEFT JOIN domain_ip_addresses dip ON dip.ip_address_id = dst_ip.id
+    LEFT JOIN domains d ON d.id = dip.domain_id
+    GROUP BY COALESCE(d.domain, dst_ip.ip_address)
     ORDER BY cnt DESC
     LIMIT 200
 ");

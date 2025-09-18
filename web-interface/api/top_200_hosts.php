@@ -4,11 +4,11 @@ require_once __DIR__ . '/../zoplog_config.php';
 
 // Top 200 hosts (30 days)
 $top30 = $mysqli->query("
-    SELECT h.hostname, COUNT(*) as cnt
+    SELECT d.domain, COUNT(*) as cnt
     FROM packet_logs p
-    JOIN hostnames h ON p.hostname_id = h.id
+    JOIN domains d ON p.domain_id = d.id
     WHERE p.packet_timestamp >= NOW() - INTERVAL 30 DAY
-    GROUP BY h.hostname
+    GROUP BY d.domain
     ORDER BY cnt DESC
     LIMIT 200
 ");
@@ -20,11 +20,11 @@ while ($row = $top30->fetch_assoc()) {
 
 // Top 200 hosts (365 days)
 $top365 = $mysqli->query("
-    SELECT h.hostname, COUNT(*) as cnt
+    SELECT d.domain, COUNT(*) as cnt
     FROM packet_logs p
-    JOIN hostnames h ON p.hostname_id = h.id
+    JOIN domains d ON p.domain_id = d.id
     WHERE p.packet_timestamp >= NOW() - INTERVAL 365 DAY
-    GROUP BY h.hostname
+    GROUP BY d.domain
     ORDER BY cnt DESC
     LIMIT 200
 ");

@@ -131,23 +131,23 @@ while ($row = $res_ips->fetch_assoc()) {
 }
 
 // Query 2b: recent hostnames for these ids (30 days), src and dst
-$sql_hostnames = "SELECT hp.ip_id, GROUP_CONCAT(DISTINCT h.hostname ORDER BY h.hostname SEPARATOR '|') AS all_hostnames
+$sql_hostnames = "SELECT hp.ip_id, GROUP_CONCAT(DISTINCT d.domain ORDER BY d.domain SEPARATOR '|') AS all_hostnames
 FROM (
-    SELECT pl.src_ip_id AS ip_id, pl.hostname_id
+    SELECT pl.src_ip_id AS ip_id, pl.domain_id
     FROM packet_logs pl
     WHERE pl.src_ip_id IS NOT NULL
-      AND pl.hostname_id IS NOT NULL
+      AND pl.domain_id IS NOT NULL
       AND pl.packet_timestamp >= DATE_SUB(NOW(), INTERVAL 30 DAY)
       AND pl.src_ip_id IN ($in_list)
     UNION ALL
-    SELECT pl.dst_ip_id AS ip_id, pl.hostname_id
+    SELECT pl.dst_ip_id AS ip_id, pl.domain_id
     FROM packet_logs pl
     WHERE pl.dst_ip_id IS NOT NULL
-      AND pl.hostname_id IS NOT NULL
+      AND pl.domain_id IS NOT NULL
       AND pl.packet_timestamp >= DATE_SUB(NOW(), INTERVAL 30 DAY)
       AND pl.dst_ip_id IN ($in_list)
 ) AS hp
-JOIN hostnames h ON hp.hostname_id = h.id
+JOIN domains d ON hp.domain_id = d.id
 GROUP BY hp.ip_id";
 
 $res_hn = $mysqli->query($sql_hostnames);
