@@ -5,66 +5,54 @@ header("Content-Type: application/json");
 require_once __DIR__ . '/zoplog_config.php';
 
 try {
-    // Query to aggregate blocked events by primary IP with hostname information
+    // Accept cursor and limit from GET
+    $limit = isset($_GET['limit']) ? intval($_GET['limit']) : 30;
+    if ($limit <= 0 || $limit > 500) $limit = 30;
+    $last_id = isset($_GET['last_id']) ? intval($_GET['last_id']) : null;
+    $where_clause = $last_id ? "WHERE be.id < " . $last_id : "";
+
+    // Main query: fetch blocked events with pagination
     $sql = "SELECT
-        primary_ip_data.primary_ip_id,
-        primary_ip_data.primary_ip,
+        pid.primary_ip_id,
+        pid.primary_ip,
         GROUP_CONCAT(DISTINCT bd.domain ORDER BY bd.domain SEPARATOR '|') AS all_hostnames,
-        primary_ip_data.latest_event_time,
-        latest_event.direction AS latest_direction,
-        UPPER(latest_event.proto) AS latest_proto,
-        latest_event.src_ip AS latest_src_ip,
-        latest_event.dst_ip AS latest_dst_ip,
-        latest_event.iface_in AS latest_iface_in,
-        latest_event.iface_out AS latest_iface_out,
-        latest_event.message AS latest_message,
-        0 AS cnt_url_blocklists,
-        0 AS cnt_manual_system_blocklists
+        MAX(pid.id) AS latest_event_id,
+        MAX(pid.event_time) AS latest_event_time,
+        SUBSTRING_INDEX(GROUP_CONCAT(pid.direction ORDER BY pid.event_time DESC), ',', 1) AS latest_direction,
+        SUBSTRING_INDEX(GROUP_CONCAT(pid.proto ORDER BY pid.event_time DESC), ',', 1) AS latest_proto,
+        SUBSTRING_INDEX(GROUP_CONCAT(pid.src_ip_id ORDER BY pid.event_time DESC), ',', 1) AS latest_src_ip,
+        SUBSTRING_INDEX(GROUP_CONCAT(pid.dst_ip_id ORDER BY pid.event_time DESC), ',', 1) AS latest_dst_ip,
+        SUBSTRING_INDEX(GROUP_CONCAT(pid.iface_in ORDER BY pid.event_time DESC), ',', 1) AS latest_iface_in,
+        SUBSTRING_INDEX(GROUP_CONCAT(pid.iface_out ORDER BY pid.event_time DESC), ',', 1) AS latest_iface_out,
+        SUBSTRING_INDEX(GROUP_CONCAT(pid.message ORDER BY pid.event_time DESC), ',', 1) AS latest_message,
+        COUNT(*) AS event_count
     FROM (
-        -- Subquery to aggregate by primary IP
         SELECT
-            CASE WHEN be.direction = 'OUT' THEN be.dst_ip_id WHEN be.direction = 'IN' THEN be.src_ip_id ELSE be.dst_ip_id END AS primary_ip_id,
-            CASE WHEN be.direction = 'OUT' THEN dst_ip.ip_address WHEN be.direction = 'IN' THEN src_ip.ip_address ELSE dst_ip.ip_address END AS primary_ip,
-            MAX(be.event_time) AS latest_event_time
-        FROM blocked_events be
-        LEFT JOIN ip_addresses src_ip ON be.src_ip_id = src_ip.id
-        LEFT JOIN ip_addresses dst_ip ON be.dst_ip_id = dst_ip.id
-        GROUP BY primary_ip_id
-        ORDER BY latest_event_time DESC
-        LIMIT 30
-    ) AS primary_ip_data
-    -- Join to get hostname information
-    LEFT JOIN blocked_ips bi ON bi.ip_id = primary_ip_data.primary_ip_id AND bi.last_seen >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-    LEFT JOIN blocklist_domains bd ON bi.blocklist_domain_id = bd.id
-    -- Join to get latest event details
-    LEFT JOIN (
-        SELECT
-            CASE WHEN be.direction = 'OUT' THEN be.dst_ip_id WHEN be.direction = 'IN' THEN be.src_ip_id ELSE be.dst_ip_id END AS primary_ip_id,
+            CASE WHEN direction = 'IN' THEN src_ip_id
+                 WHEN direction = 'OUT' THEN dst_ip_id
+                 ELSE src_ip_id END AS primary_ip_id,
+            CASE WHEN direction = 'IN' THEN src_ip.ip_address
+                 WHEN direction = 'OUT' THEN dst_ip.ip_address
+                 ELSE src_ip.ip_address END AS primary_ip,
+            be.id,
+            be.event_time,
             be.direction,
             be.proto,
-            src_ip.ip_address AS src_ip,
-            dst_ip.ip_address AS dst_ip,
+            be.src_ip_id,
+            be.dst_ip_id,
             be.iface_in,
             be.iface_out,
             be.message
         FROM blocked_events be
         LEFT JOIN ip_addresses src_ip ON be.src_ip_id = src_ip.id
         LEFT JOIN ip_addresses dst_ip ON be.dst_ip_id = dst_ip.id
-        INNER JOIN (
-            SELECT
-                CASE WHEN direction = 'OUT' THEN dst_ip_id WHEN direction = 'IN' THEN src_ip_id ELSE dst_ip_id END AS primary_ip_id,
-                MAX(event_time) AS max_time
-            FROM blocked_events
-            GROUP BY CASE WHEN direction = 'OUT' THEN dst_ip_id WHEN direction = 'IN' THEN src_ip_id ELSE dst_ip_id END
-        ) latest_times ON (
-            CASE WHEN be.direction = 'OUT' THEN be.dst_ip_id WHEN be.direction = 'IN' THEN be.src_ip_id ELSE be.dst_ip_id END = latest_times.primary_ip_id
-            AND be.event_time = latest_times.max_time
-        )
-    ) AS latest_event ON latest_event.primary_ip_id = primary_ip_data.primary_ip_id
-    GROUP BY primary_ip_data.primary_ip_id, primary_ip_data.primary_ip, primary_ip_data.latest_event_time,
-             latest_event.direction, latest_event.proto, latest_event.src_ip, latest_event.dst_ip,
-             latest_event.iface_in, latest_event.iface_out, latest_event.message
-    ORDER BY primary_ip_data.latest_event_time DESC";
+        " . ($last_id ? "WHERE be.id < " . intval($last_id) : "") . "
+    ) pid
+    LEFT JOIN blocked_ips bi ON bi.ip_id = pid.primary_ip_id AND bi.last_seen >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+    LEFT JOIN blocklist_domains bd ON bi.blocklist_domain_id = bd.id
+    GROUP BY pid.primary_ip_id, pid.primary_ip
+    ORDER BY latest_event_id DESC
+    LIMIT " . $limit;
 
     $result = $mysqli->query($sql);
 
@@ -82,8 +70,9 @@ try {
         $rows[] = [
             'primary_ip' => $row['primary_ip'],
             'primary_ip_id' => intval($row['primary_ip_id']),
-            'all_hostnames' => $row['all_hostnames']." ---sddsdfsfsdf",
+            'all_hostnames' => $row['all_hostnames'],
             'latest_event_time' => $row['latest_event_time'],
+            'event_count' => intval($row['event_count']),
             'latest_direction' => $row['latest_direction'],
             'latest_proto' => $row['latest_proto'],
             'latest_src_ip' => $row['latest_src_ip'],
@@ -91,8 +80,8 @@ try {
             'latest_iface_in' => $row['latest_iface_in'],
             'latest_iface_out' => $row['latest_iface_out'],
             'latest_message' => $row['latest_message'],
-            'cnt_url_blocklists' => intval($row['cnt_url_blocklists']),
-            'cnt_manual_system_blocklists' => intval($row['cnt_manual_system_blocklists'])
+            'cnt_url_blocklists' => 0,
+            'cnt_manual_system_blocklists' => 0
         ];
     }
 

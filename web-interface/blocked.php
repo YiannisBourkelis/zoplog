@@ -296,7 +296,7 @@
           <option value="1000">1s</option>
           <option value="5000">5s</option>
           <option value="10000">10s</option>
-          <option value="30000">30s</option>
+          <option value="30000" selected>30s</option>
         </select>
       </label>
 
@@ -350,10 +350,12 @@
 <script>
 // JavaScript variables
 let offset = 0;
+let lastId = null; // cursor: the smallest id we've loaded; next page should ask for rows with id < lastId
 let autoRefreshTimer = null;
-let latestTimestamp = null;
+let latestId = null; // the largest id we've loaded; for auto-refresh, get rows with id > latestId
 let filters = { ip: "", direction: "", proto: "", iface: "" };
 let userAtTop = true;
+let isLoading = false; // Prevent multiple simultaneous requests
 
 // Global function to format event time
 function formatEventTime(timestamp) {
@@ -429,7 +431,7 @@ function renderRow(row) {
   // Create time display with tree arrow on the left
   const timeDisplay = allHostnames.length > 1 ? 
     `<div class="time-cell-with-arrow">
-       <span class="expand-toggle time-arrow" onclick="toggleChildren('${row.primary_ip}')">▶</span>
+       <span class="expand-toggle time-arrow" onclick="toggleChildren('${row.id}')">▶</span>
        ${formattedTime}
      </div>` : 
     `<div class="time-cell-with-arrow">
@@ -503,6 +505,7 @@ async function addToWhitelist(uniqueId, hostname, displayName) {
     const hostnames = hostname.includes(',') ? hostname.split(',').map(h => h.trim()) : [hostname];
     
     // Process each hostname
+    let lastResponse = null;
     for (const host of hostnames) {
       const res = await fetch('blocked_actions.php', {
         method: 'POST',
@@ -519,6 +522,8 @@ async function addToWhitelist(uniqueId, hostname, displayName) {
       if (json.status !== 'ok') {
         throw new Error(json.message || `Failed to whitelist ${host}`);
       }
+      
+      lastResponse = json; // Store the last response to use for the message
     }
     
     // Close any open popup
@@ -531,11 +536,16 @@ async function addToWhitelist(uniqueId, hostname, displayName) {
       activeRow.classList.remove('active');
     }
     
-    // Show success message
-    if (hostnames.length > 1) {
-      showTemporaryMessage(`✓ Successfully added ${hostnames.length} domains to whitelist.`, 'success');
+    // Show success message using the backend response
+    if (lastResponse && lastResponse.message) {
+      showTemporaryMessage(`✓ ${lastResponse.message}`, 'success');
     } else {
-      showTemporaryMessage(`✓ Successfully added "${displayName}" to whitelist.`, 'success');
+      // Fallback to generic message if no backend message
+      if (hostnames.length > 1) {
+        showTemporaryMessage(`✓ Successfully added ${hostnames.length} domains to whitelist.`, 'success');
+      } else {
+        showTemporaryMessage(`✓ Successfully added "${displayName}" to whitelist.`, 'success');
+      }
     }
     
     // Mark rows as whitelisted instead of removing them
@@ -692,17 +702,16 @@ function showTemporaryMessage(message, type = 'success') {
 }
 
 // Function to toggle child rows visibility
-function toggleChildren(toggleElement, parentIp) {
-  console.log("toggleChildren called with:", toggleElement, parentIp);
+function toggleChildren(toggleElement, rowId) {
+  console.log("toggleChildren called with:", toggleElement, rowId);
   
   // Prevent the click from bubbling up to the row click handler
   if (event) {
     event.stopPropagation();
   }
   
-  const escapedIp = escapeIpForClass(parentIp);
-  const childRows = document.querySelectorAll(`tr.child-row-${escapedIp}`);
-  console.log("Escaped IP:", escapedIp);
+  const childRows = document.querySelectorAll(`tr.child-row-${rowId}`);
+  console.log("Row ID:", rowId);
   console.log("Found child rows:", childRows.length, childRows);
   
   const isExpanded = toggleElement.classList.contains('expanded');
@@ -741,11 +750,13 @@ function renderRow(row) {
 }
 
 async function fetchBlocked(reset=false, prepend=false) {
+  if (isLoading) return; // Prevent multiple simultaneous requests
+  isLoading = true;
+  
   const tbody = document.getElementById("logs-body");
   document.getElementById("loading").classList.remove("hidden");
 
   const params = new URLSearchParams({
-    offset: reset ? 0 : offset,
     limit: 200,
     ip: filters.ip,
     direction: filters.direction,
@@ -753,12 +764,22 @@ async function fetchBlocked(reset=false, prepend=false) {
     iface: filters.iface
   });
 
-  if (prepend && latestTimestamp) {
-    params.append("since", latestTimestamp);
+  // For cursor-based pagination: when not resetting and we have a lastId, request older rows
+  if (!reset && lastId) {
+    params.append('last_id', lastId);
+  }
+
+  if (prepend) {
+    if (latestId !== null) {
+      params.append("latest_id", latestId);
+    } else {
+      // If latestId is null, get events with ID > 0 (all events)
+      params.append("latest_id", 0);
+    }
   }
 
   try {
-    const res = await fetch("fetch_blocked_experiment.php?" + params.toString());
+    const res = await fetch("fetch_blocked_experiment_b.php?" + params.toString());
     
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}: ${res.statusText}`);
@@ -768,7 +789,11 @@ async function fetchBlocked(reset=false, prepend=false) {
 
     if (prepend) {
       if (data.length > 0) {
-        latestTimestamp = data[data.length - 1].latest_event_time;
+        // Update latestId to the maximum ID from new data for future auto-refresh
+        const newIds = data.map(r => parseInt(r.id, 10)).filter(id => !isNaN(id));
+        if (newIds.length > 0) {
+          latestId = Math.max(latestId || 0, ...newIds);
+        }
         const fragment = document.createDocumentFragment();
         
         data.forEach(row => {
@@ -787,7 +812,7 @@ async function fetchBlocked(reset=false, prepend=false) {
             <td class="time-column">
               <div class="time-cell-with-arrow">
                 ${allHostnames.length > 1 ? 
-                  `<span class="expand-toggle time-arrow" onclick="toggleChildren(this, '${row.primary_ip}')">▶</span>` : 
+                  `<span class="expand-toggle time-arrow" onclick="toggleChildren(this, '${row.id}')">▶</span>` : 
                   '<span class="time-arrow-spacer"></span>'
                 }
                 ${formatEventTime(row.latest_event_time || '')}
@@ -823,7 +848,7 @@ async function fetchBlocked(reset=false, prepend=false) {
           if (allHostnames.length > 1) {
             allHostnames.slice(1).forEach((hostname, index) => {
               const childTr = document.createElement("tr");
-              childTr.className = `child-row child-row-${escapedIp} table-row`;
+              childTr.className = `child-row child-row-${row.id} table-row`;
               childTr.style.display = "none";
               childTr.innerHTML = `
                 <td style="padding-left: 40px;">${index === allHostnames.length - 2 ? '└─' : '├─'} ${hostname}</td>
@@ -849,17 +874,18 @@ async function fetchBlocked(reset=false, prepend=false) {
         if (!userAtTop) {
           document.getElementById("new-logs-banner").classList.remove("hidden");
         } else {
-          tbody.parentElement.scrollTop = 0;
+          window.scrollTo(0, 0);
         }
       }
     } else {
       if (reset) {
         tbody.innerHTML = "";
         offset = 0;
+        lastId = null;
       }
       
       const fragment = document.createDocumentFragment();
-      data.forEach(row => {
+  data.forEach(row => {
         const allHostnames = (row.all_hostnames && row.all_hostnames.trim() !== '') ? row.all_hostnames.split('|') : [];
         const escapedIp = escapeIpForClass(row.primary_ip);
         
@@ -875,7 +901,7 @@ async function fetchBlocked(reset=false, prepend=false) {
           <td class="time-column">
             <div class="time-cell-with-arrow">
               ${allHostnames.length > 1 ? 
-                `<span class="expand-toggle time-arrow" onclick="toggleChildren(this, '${row.primary_ip}')">▶</span>` : 
+                `<span class="expand-toggle time-arrow" onclick="toggleChildren(this, '${row.id}')">▶</span>` : 
                 '<span class="time-arrow-spacer"></span>'
               }
               ${formatEventTime(row.latest_event_time || '')}
@@ -909,7 +935,7 @@ async function fetchBlocked(reset=false, prepend=false) {
         if (allHostnames.length > 1) {
           allHostnames.slice(1).forEach((hostname, index) => {
             const childTr = document.createElement("tr");
-            childTr.className = `child-row child-row-${escapedIp} table-row`;
+            childTr.className = `child-row child-row-${row.id} table-row`;
             childTr.style.display = "none";
             childTr.innerHTML = `
               <td style="padding-left: 40px;">${index === allHostnames.length - 2 ? '└─' : '├─'} ${hostname}</td>
@@ -931,9 +957,19 @@ async function fetchBlocked(reset=false, prepend=false) {
       
       tbody.appendChild(fragment);
       if (data.length > 0) {
-        latestTimestamp = data[0].latest_event_time;
+        // update lastId: find the minimum id in the returned batch (cursor for older rows)
+        const ids = data.map(r => {
+          const id = parseInt(r.id, 10);
+          return isNaN(id) ? null : id;
+        }).filter(id => id !== null);
+        if (ids.length > 0) {
+          const minId = Math.min(...ids);
+          lastId = minId;
+          // Also update latestId to the maximum ID for auto-refresh
+          const maxId = Math.max(...ids);
+          latestId = Math.max(latestId || 0, maxId);
+        }
       }
-      offset += data.length;
     }
 
     updateLastRefreshIndicator();
@@ -942,6 +978,7 @@ async function fetchBlocked(reset=false, prepend=false) {
     updateLastRefreshIndicator(true);
   } finally {
     document.getElementById("loading").classList.add("hidden");
+    isLoading = false;
   }
 }
 
@@ -1019,10 +1056,14 @@ document.addEventListener('click', (e) => {
   }
 });
 
+let scrollThrottle = false;
+
 // Infinite scroll
 window.addEventListener("scroll", () => {
-  if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 100) {
+  if (!scrollThrottle && window.innerHeight + window.scrollY >= document.body.offsetHeight - 100) {
+    scrollThrottle = true;
     fetchBlocked();
+    setTimeout(() => scrollThrottle = false, 200); // Throttle for 200ms
   }
   userAtTop = window.scrollY < 50;
   if (userAtTop) document.getElementById("new-logs-banner").classList.add("hidden");
@@ -1034,16 +1075,9 @@ const savedInterval = localStorage.getItem("blocked-refresh-interval");
 if (savedInterval !== null) {
   refreshSelect.value = savedInterval;
 }
-refreshSelect.addEventListener("change", e => {
-  clearInterval(autoRefreshTimer);
-  const interval = parseInt(e.target.value);
-  localStorage.setItem("blocked-refresh-interval", e.target.value);
-  if (interval > 0) {
-    autoRefreshTimer = setInterval(() => fetchBlocked(false, true), interval);
-  }
-});
-if (savedInterval && parseInt(savedInterval) > 0) {
-  autoRefreshTimer = setInterval(() => fetchBlocked(false, true), parseInt(savedInterval));
+const initialInterval = savedInterval ? parseInt(savedInterval) : parseInt(refreshSelect.value);
+if (initialInterval > 0) {
+  autoRefreshTimer = setInterval(() => fetchBlocked(false, true), initialInterval);
 }
 
 // Update last refresh time indicator
@@ -1082,7 +1116,7 @@ document.getElementById("apply-filters").addEventListener("click", () => {
   filters.direction = document.getElementById("filter-direction").value.toUpperCase();
   filters.proto = document.getElementById("filter-proto").value.toUpperCase();
   filters.iface = document.getElementById("filter-iface").value;
-  latestTimestamp = null;
+  latestId = null;
   fetchBlocked(true);
 });
 
