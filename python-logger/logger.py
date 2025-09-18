@@ -286,6 +286,15 @@ def insert_packet_log(packet_timestamp, src_ip, src_port, dst_ip, dst_port,
         """, (packet_timestamp, src_ip_id, src_port, dst_ip_id, dst_port,
               src_mac_id, dst_mac_id,
               method, domain_id, path_id, user_agent_id, accept_language_id, pkt_type))
+
+        # Increment allowed_count in domain_ip_addresses table if we have both domain_id and dst_ip_id
+        if domain_id and dst_ip_id:
+            cursor.execute("""
+                UPDATE domain_ip_addresses
+                SET allowed_count = allowed_count + 1, last_seen = NOW()
+                WHERE domain_id = %s AND ip_address_id = %s
+            """, (domain_id, dst_ip_id))
+
         conn.commit()
 
     except mariadb.Error as e:
@@ -304,6 +313,15 @@ def insert_packet_log(packet_timestamp, src_ip, src_port, dst_ip, dst_port,
                 """, (packet_timestamp, src_ip_id, src_port, dst_ip_id, dst_port,
                       src_mac_id, dst_mac_id,
                       method, domain_id, path_id, user_agent_id, accept_language_id, pkt_type))
+
+                # Increment allowed_count in domain_ip_addresses table if we have both domain_id and dst_ip_id
+                if domain_id and dst_ip_id:
+                    cursor.execute("""
+                        UPDATE domain_ip_addresses
+                        SET allowed_count = allowed_count + 1, last_seen = NOW()
+                        WHERE domain_id = %s AND ip_address_id = %s
+                    """, (domain_id, dst_ip_id))
+
                 conn.commit()
             except Exception as e2:
                 print(f"Packet log insert failed after reconnect: {e2}")
@@ -415,33 +433,8 @@ def is_host_whitelisted(host: str, settings: dict):
 
 def _record_blocked_ip(blocklist_domain_id: int, ip: str):
     """Insert or update the blocked IP record linked to a specific blocklist_domain row."""
-    global conn, cursor
-    if not ip or not blocklist_domain_id:
-        return
-    try:
-        conn, cursor = get_db_connection()
-        ip_id = get_or_insert_ip(ip, cursor=cursor)
-        if not ip_id:
-            return
-        # Upsert to track first/last_seen and hit_count
-        cursor.execute(
-            """
-            INSERT INTO blocked_ips (blocklist_domain_id, ip_id, first_seen, last_seen, hit_count)
-            VALUES (%s, %s, NOW(), NOW(), 1)
-            ON DUPLICATE KEY UPDATE last_seen = VALUES(last_seen), hit_count = hit_count + 1
-            """,
-            (blocklist_domain_id, ip_id),
-        )
-        conn.commit()
-    except mariadb.Error as e:
-        if "MySQL server has gone away" in str(e):
-            try:
-                conn, cursor = get_db_connection()
-                _record_blocked_ip(blocklist_domain_id, ip)
-            except Exception as e2:
-                print(f"blocked_ips insert failed after reconnect: {e2}")
-        else:
-            print(f"blocked_ips insert error: {e}")
+    # This function is no longer needed since blocked_ips table was removed
+    pass
 
 
 def ipset_add_ip(blocklist_id: int, ip: str, blocklist_domain_id: int | None = None, settings: dict = None):
@@ -501,12 +494,7 @@ def ipset_add_ip(blocklist_id: int, ip: str, blocklist_domain_id: int | None = N
 
     # Independently record in DB (even if firewall fails, for observability)
     if blocklist_domain_id:
-        try:
-            debug_print(f"DEBUG: Recording blocked IP in database for domain_id={blocklist_domain_id}", settings=settings)
-            _record_blocked_ip(blocklist_domain_id, ip)
-            debug_print(f"DEBUG: Successfully recorded blocked IP in database", settings=settings)
-        except Exception as e:
-            print(f"ERROR: record blocked_ip error domain_id={blocklist_domain_id} ip={ip} err={e}")
+        debug_print(f"DEBUG: Database recording skipped (blocked_ips table removed) for domain_id={blocklist_domain_id}", settings=settings)
     else:
         debug_print(f"DEBUG: No blocklist_domain_id provided, skipping database record", settings=settings)
 

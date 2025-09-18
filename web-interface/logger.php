@@ -350,7 +350,7 @@ document.addEventListener('click', async (e) => {
       
       const data = await res.json();
       
-      if (data.success) {
+      if (data.status === 'ok') {
         if (action === 'block') {
           alert(data.message || `Domain "${domain}" has been blocked successfully!`);
         } else {
@@ -371,14 +371,14 @@ document.addEventListener('click', async (e) => {
 // Function to check and update block button states for visible domains
 async function updateBlockButtonStates() {
   const buttons = document.querySelectorAll('.block-domain-btn[data-action="block"]');
-  const hostnames = Array.from(buttons).map(btn => btn.dataset.hostname).filter((v, i, a) => a.indexOf(v) === i);
+  const domains = Array.from(buttons).map(btn => btn.dataset.domain).filter((v, i, a) => a.indexOf(v) === i);
   
-  if (hostnames.length === 0) return;
+  if (domains.length === 0) return;
   
   try {
-    // Check which hostnames are already blocked
+    // Check which domains are already blocked
     const formData = new FormData();
-    formData.append('hostnames', JSON.stringify(hostnames));
+    formData.append('hostnames', JSON.stringify(domains));
     
     const res = await fetch('check_blocked_hostnames.php', {
       method: 'POST',
@@ -393,10 +393,10 @@ async function updateBlockButtonStates() {
     const data = await res.json();
     
     if (data.status === 'ok' && data.blocked) {
-      // Update buttons for blocked hostnames
+      // Update buttons for blocked domains
       buttons.forEach(button => {
-        const hostname = button.dataset.hostname;
-        if (data.blocked.includes(hostname)) {
+        const domain = button.dataset.domain;
+        if (data.blocked.includes(domain)) {
           button.textContent = 'Undo Block';
           button.dataset.action = 'unblock';
           button.classList.remove('bg-red-500', 'hover:bg-red-600');
@@ -405,7 +405,7 @@ async function updateBlockButtonStates() {
       });
     }
   } catch (error) {
-    console.error('Failed to check blocked hostnames:', error);
+    console.error('Failed to check blocked domains:', error);
   }
 }
 

@@ -101,18 +101,11 @@ try {
         }
         $stmt->close();
 
-        // For each associated IP, remove from firewall and clean up blocked_ips entries
+        // For each associated IP, remove from firewall
         $removedIPs = [];
         foreach ($associatedIPs as $ipData) {
             $ipAddress = $ipData['ip_address'];
             $ipId = $ipData['ip_id'];
-
-            // Keep in blocked_ips for statistics but mark as unblocked by updating last_seen
-            // This preserves historical data while indicating the IP is no longer actively blocked
-            $stmt = $mysqli->prepare('UPDATE blocked_ips SET last_seen = NOW() WHERE blocklist_domain_id = ? AND ip_id = ?');
-            $stmt->bind_param('ii', $domainId, $ipId);
-            $stmt->execute();
-            $stmt->close();
 
             // Remove from firewall sets (both IPv4 and IPv6 sets for this blocklist)
             $ipFamily = filter_var($ipAddress, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) ? 'v6' : 'v4';
