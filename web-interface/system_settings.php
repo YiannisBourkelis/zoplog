@@ -16,6 +16,7 @@ function loadSystemSettings() {
         'log_level' => 'INFO',
         'block_mode' => 'immediate',
         'log_blocked' => true,
+        'firewall_rule_timeout' => 10800,  // 3 hours default
         'update_interval' => 30,
         'max_log_entries' => 10000,
         'last_updated' => null
@@ -35,6 +36,7 @@ function loadSystemSettings() {
                 $config['firewall_interface'] = $settings['firewall']['apply_to_interface'] ?? $config['firewall_interface'];
                 $config['block_mode'] = $settings['firewall']['block_mode'] ?? $config['block_mode'];
                 $config['log_blocked'] = filter_var($settings['firewall']['log_blocked'] ?? $config['log_blocked'], FILTER_VALIDATE_BOOLEAN);
+                $config['firewall_rule_timeout'] = max(1, (int)($settings['firewall']['firewall_rule_timeout'] ?? $config['firewall_rule_timeout']));
             }
             if (isset($settings['system'])) {
                 $config['update_interval'] = (int)($settings['system']['update_interval'] ?? $config['update_interval']);
@@ -73,6 +75,30 @@ function getAvailableInterfaces() {
     }
     
     return $interfaces;
+}
+
+// Format timeout value for display
+function formatTimeout($seconds) {
+    if ($seconds == 0) {
+        return "No expiration (persistent)";
+    }
+    
+    $hours = floor($seconds / 3600);
+    $minutes = floor(($seconds % 3600) / 60);
+    $remainingSeconds = $seconds % 60;
+    
+    $parts = [];
+    if ($hours > 0) {
+        $parts[] = $hours . " hour" . ($hours != 1 ? "s" : "");
+    }
+    if ($minutes > 0) {
+        $parts[] = $minutes . " minute" . ($minutes != 1 ? "s" : "");
+    }
+    if ($remainingSeconds > 0 && empty($parts)) {
+        $parts[] = $remainingSeconds . " second" . ($remainingSeconds != 1 ? "s" : "");
+    }
+    
+    return implode(", ", $parts);
 }
 
 // Save settings to centralized config
@@ -114,7 +140,8 @@ function saveSystemSettings($settings) {
     $config .= "[firewall]\n";
     $config .= "apply_to_interface = " . ($settings['firewall_interface'] ?? $settings['monitor_interface'] ?? 'eth0') . "\n";
     $config .= "block_mode = " . ($settings['block_mode'] ?? 'immediate') . "\n";
-    $config .= "log_blocked = " . ($settings['log_blocked'] ? 'true' : 'false') . "\n\n";
+    $config .= "log_blocked = " . ($settings['log_blocked'] ? 'true' : 'false') . "\n";
+    $config .= "firewall_rule_timeout = " . ($settings['firewall_rule_timeout'] ?? 10800) . "\n\n";
     
     $config .= "[system]\n";
     $config .= "update_interval = " . ($settings['update_interval'] ?? 30) . "\n";
@@ -191,38 +218,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['action'])) {
         if ($_POST['action'] === 'save_settings') {
             $interface = $_POST['monitor_interface'] ?? '';
-            $firewallInterface = $_POST['firewall_interface'] ?? '';
+            $firewallInterface = $_POST['firewall_interface'] ?? $interface; // Default to monitor interface
             $availableInterfaces = getAvailableInterfaces();
             
             if (in_array($interface, $availableInterfaces) && in_array($firewallInterface, $availableInterfaces)) {
-                $settings = [
-                    'monitor_interface' => $interface,
-                    'firewall_interface' => $firewallInterface
-                ];
+                $firewallTimeout = (int)($_POST['firewall_rule_timeout'] ?? 10800);
                 
-                // Debug information - now using centralized config
-                $settingsFile = '/etc/zoplog/zoplog.conf';
-                $settingsDir = dirname($settingsFile);
-                
-                // Check permissions and directory
-                $debugInfo = [];
-                $debugInfo[] = "Settings file path: $settingsFile";
-                $debugInfo[] = "Settings directory: $settingsDir";
-                $debugInfo[] = "Directory exists: " . (is_dir($settingsDir) ? 'YES' : 'NO');
-                $debugInfo[] = "Directory writable: " . (is_writable($settingsDir) ? 'YES' : 'NO');
-                $debugInfo[] = "File exists: " . (file_exists($settingsFile) ? 'YES' : 'NO');
-                if (file_exists($settingsFile)) {
-                    $debugInfo[] = "File writable: " . (is_writable($settingsFile) ? 'YES' : 'NO');
-                }
-                $debugInfo[] = "Current user: " . get_current_user();
-                $debugInfo[] = "Web server user: " . (function_exists('posix_getpwuid') ? posix_getpwuid(posix_getuid())['name'] : 'unknown');
-                
-                if (saveSystemSettings($settings)) {
-                    $message = "Settings saved successfully! You may need to restart the logger service for changes to take effect.\n\nInterface set to: $interface";
-                    $messageType = 'success';
-                } else {
-                    $message = "Error: Could not save settings file.\n\nDebugging information:\n" . implode("\n", $debugInfo);
+                // Validate firewall timeout (must be at least 1 second)
+                if ($firewallTimeout < 1) {
+                    $message = "Firewall rule timeout must be at least 1 second.";
                     $messageType = 'error';
+                } else {
+                    $settings = [
+                        'monitor_interface' => $interface,
+                        'firewall_interface' => $firewallInterface,
+                        'firewall_rule_timeout' => $firewallTimeout
+                    ];
+                    
+                    // Debug information - now using centralized config
+                    $settingsFile = '/etc/zoplog/zoplog.conf';
+                    $settingsDir = dirname($settingsFile);
+                    
+                    // Check permissions and directory
+                    $debugInfo = [];
+                    $debugInfo[] = "Settings file path: $settingsFile";
+                    $debugInfo[] = "Settings directory: $settingsDir";
+                    $debugInfo[] = "Directory exists: " . (is_dir($settingsDir) ? 'YES' : 'NO');
+                    $debugInfo[] = "Directory writable: " . (is_writable($settingsDir) ? 'YES' : 'NO');
+                    $debugInfo[] = "File exists: " . (file_exists($settingsFile) ? 'YES' : 'NO');
+                    if (file_exists($settingsFile)) {
+                        $debugInfo[] = "File writable: " . (is_writable($settingsFile) ? 'YES' : 'NO');
+                    }
+                    $debugInfo[] = "Current user: " . get_current_user();
+                    $debugInfo[] = "Web server user: " . (function_exists('posix_getpwuid') ? posix_getpwuid(posix_getuid())['name'] : 'unknown');
+                    
+                    if (saveSystemSettings($settings)) {
+                        $message = "Settings saved successfully! You may need to restart the logger service for changes to take effect.\n\nInterface set to: $interface";
+                        $messageType = 'success';
+                    } else {
+                        $message = "Error: Could not save settings file.\n\nDebugging information:\n" . implode("\n", $debugInfo);
+                        $messageType = 'error';
+                    }
                 }
             } else {
                 $message = "Error: Invalid interface selected.";
@@ -572,30 +608,17 @@ $availableInterfaces = getAvailableInterfaces();
                 </div>
 
                 <div>
-                    <label for="firewall_interface" class="block text-sm font-medium text-gray-700 mb-2">
-                        Select Interface for Firewall Rules:
+                    <label for="firewall_rule_timeout" class="block text-sm font-medium text-gray-700 mb-2">
+                        Firewall Rule Expiration Timeout (seconds):
                     </label>
-                    <select name="firewall_interface" id="firewall_interface" 
-                            class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                        <?php foreach ($availableInterfaces as $iface): ?>
-                            <option value="<?php echo htmlspecialchars($iface); ?>" 
-                                    <?php echo $iface === ($currentSettings['firewall_interface'] ?? $currentSettings['monitor_interface']) ? 'selected' : ''; ?>>
-                                <?php echo htmlspecialchars($iface); ?>
-                                <?php if ($iface === 'eth0'): ?>
-                                    (WAN Interface - Recommended for Internet Blocking)
-                                <?php elseif ($iface === 'br-zoplog'): ?>
-                                    (Bridge Interface - All Traffic)
-                                <?php elseif (strpos($iface, 'eth') === 0): ?>
-                                    (Ethernet Interface)
-                                <?php endif; ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
+                    <input type="number" name="firewall_rule_timeout" id="firewall_rule_timeout" 
+                           value="<?php echo htmlspecialchars($currentSettings['firewall_rule_timeout'] ?? 10800); ?>" 
+                           min="1" max="604800" step="1"
+                           class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
                     <p class="mt-2 text-sm text-gray-600">
-                        Current firewall: <strong><?php echo htmlspecialchars($currentSettings['firewall_interface'] ?? $currentSettings['monitor_interface']); ?></strong>
-                        <?php if ($currentSettings['last_updated']): ?>
-                            (Last updated: <?php echo htmlspecialchars($currentSettings['last_updated']); ?>)
-                        <?php endif; ?>
+                        Current timeout: <strong><?php echo htmlspecialchars($currentSettings['firewall_rule_timeout'] ?? 10800); ?> seconds</strong>
+                        (<?php echo htmlspecialchars(formatTimeout($currentSettings['firewall_rule_timeout'] ?? 10800)); ?>)
+                        <br>Firewall rules will automatically expire after this time period.
                     </p>
                 </div>
                 

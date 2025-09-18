@@ -27,6 +27,10 @@ block_mode = immediate
 # Whether to log blocked traffic
 log_blocked = true
 
+# Timeout for firewall rules in seconds (default: 10800 = 3 hours)
+# Must be at least 1 second - rules will automatically expire after this time
+firewall_rule_timeout = 10800
+
 [system]
 # How often to check for system updates (seconds)
 update_interval = 30

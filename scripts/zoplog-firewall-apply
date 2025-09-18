@@ -27,6 +27,18 @@ if [[ -z "$FIREWALL_INTERFACE" ]]; then
   FIREWALL_INTERFACE="eth0"
 fi
 
+# Load firewall rule timeout from centralized config
+FIREWALL_TIMEOUT=""
+if [[ -f "/etc/zoplog/zoplog.conf" ]]; then
+  FIREWALL_TIMEOUT=$(grep "^firewall_rule_timeout" /etc/zoplog/zoplog.conf 2>/dev/null | cut -d'=' -f2 | xargs || echo "")
+fi
+
+# Ensure timeout is at least 1 second (default to 10800 seconds = 3 hours if not configured or invalid)
+if [[ -z "$FIREWALL_TIMEOUT" || "$FIREWALL_TIMEOUT" -lt 1 ]]; then
+  FIREWALL_TIMEOUT="10800"
+fi
+FIREWALL_TIMEOUT="timeout ${FIREWALL_TIMEOUT}s"
+
 echo "Applying firewall rules to internet-facing interface: $FIREWALL_INTERFACE"
 
 # Ensure table and base chains exist
@@ -36,8 +48,8 @@ echo "Applying firewall rules to internet-facing interface: $FIREWALL_INTERFACE"
 /usr/sbin/nft list chain inet "$TABLE" forward >/dev/null 2>&1 || /usr/sbin/nft add chain inet "$TABLE" forward '{ type filter hook forward priority 0; policy accept; }'
 
 # Ensure sets exist
-/usr/sbin/nft list set inet "$TABLE" "$SET_V4" >/dev/null 2>&1 || /usr/sbin/nft add set inet "$TABLE" "$SET_V4" '{ type ipv4_addr; flags interval; }'
-/usr/sbin/nft list set inet "$TABLE" "$SET_V6" >/dev/null 2>&1 || /usr/sbin/nft add set inet "$TABLE" "$SET_V6" '{ type ipv6_addr; flags interval; }'
+/usr/sbin/nft list set inet "$TABLE" "$SET_V4" >/dev/null 2>&1 || /usr/sbin/nft add set inet "$TABLE" "$SET_V4" "{ type ipv4_addr; flags interval; $FIREWALL_TIMEOUT }"
+/usr/sbin/nft list set inet "$TABLE" "$SET_V6" >/dev/null 2>&1 || /usr/sbin/nft add set inet "$TABLE" "$SET_V6" "{ type ipv6_addr; flags interval; $FIREWALL_TIMEOUT }"
 
 # Helper: check rule by unique comment
 has_rule() {
