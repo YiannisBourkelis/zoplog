@@ -73,18 +73,13 @@ function getDatabaseInfo() {
         $activity24h = $result->fetch_assoc();
         $result->free();
 
-        // Get blocked IPs count (historical total)
-        $result = $mysqli->query("SELECT COUNT(*) as blocked_ips_count FROM blocked_ips");
-        if (!$result) {
-            throw new Exception("Query failed: " . $mysqli->error);
-        }
-        $blockedCount = $result->fetch_assoc();
-        $result->free();
+        // Get blocked IPs count (historical total) - table no longer exists in new schema
+        $blockedCount = ['blocked_ips_count' => 0];
 
         // Get blocklist stats (historical totals)
         $result = $mysqli->query("
             SELECT
-                (SELECT COUNT(*) FROM blocked_ips) as blocklist_ips,
+                0 as blocklist_ips,
                 (SELECT COUNT(*) FROM blocklist_domains) as blocklist_domains,
                 0 as whitelist_ips
         ");
@@ -412,7 +407,7 @@ $dbInfo = getDatabaseInfo();
                 </svg>
                 Recent Activity (Last 24 Hours)
             </h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div class="bg-gray-50 rounded-lg p-4">
                     <div class="text-2xl font-bold text-blue-600"><?php echo number_format($dbInfo['activity_24h']['total_packets_24h']); ?></div>
                     <div class="text-sm text-gray-600">Packets Logged</div>
@@ -420,6 +415,15 @@ $dbInfo = getDatabaseInfo();
                 <div class="bg-gray-50 rounded-lg p-4">
                     <div class="text-2xl font-bold text-green-600"><?php echo number_format($dbInfo['activity_24h']['unique_ips_24h']); ?></div>
                     <div class="text-sm text-gray-600">Unique IPs</div>
+                </div>
+                <div class="flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-red-500 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"/>
+                    </svg>
+                    <div>
+                        <p class="text-sm font-medium text-gray-600">Blocked IPs</p>
+                        <p class="text-2xl font-bold text-gray-900"><?php echo htmlspecialchars($dbInfo['blocked_count']['blocked_ips_count']); ?></p>
+                    </div>
                 </div>
             </div>
         </div>
