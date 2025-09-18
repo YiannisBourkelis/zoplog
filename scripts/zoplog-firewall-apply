@@ -37,7 +37,7 @@ fi
 if [[ -z "$FIREWALL_TIMEOUT" || "$FIREWALL_TIMEOUT" -lt 1 ]]; then
   FIREWALL_TIMEOUT="10800"
 fi
-FIREWALL_TIMEOUT="timeout ${FIREWALL_TIMEOUT}s"
+FIREWALL_TIMEOUT="timeout ${FIREWALL_TIMEOUT}s;"
 
 echo "Applying firewall rules to internet-facing interface: $FIREWALL_INTERFACE"
 
