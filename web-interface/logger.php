@@ -50,8 +50,8 @@
         <button id="clear-mac" class="text-gray-400 hover:text-gray-600 hidden">✕</button>
       </div>
       <div class="flex items-center gap-2">
-        <input id="filter-hostname" type="text" placeholder="Filter by Hostname" class="border rounded px-2 py-1">
-        <button id="clear-hostname" class="text-gray-400 hover:text-gray-600 hidden">✕</button>
+        <input id="filter-domain" type="text" placeholder="Filter by Domain" class="border rounded px-2 py-1">
+        <button id="clear-domain" class="text-gray-400 hover:text-gray-600 hidden">✕</button>
       </div>
 
       <select id="filter-method" class="border rounded px-2 py-1">
@@ -82,13 +82,13 @@
         <thead class="bg-gray-200">
           <tr>
             <th class="px-4 py-2">Time</th>
+            <th class="px-4 py-2">Domain</th>
             <th class="px-4 py-2">Src IP</th>
             <th class="px-4 py-2">Src MAC</th>
             <th class="px-4 py-2">Dst IP</th>
             <th class="px-4 py-2">Dst MAC</th>
             <th class="px-4 py-2">Type</th>
             <th class="px-4 py-2">Method</th>
-            <th class="px-4 py-2">Host</th>
             <th class="px-4 py-2">Path</th>
             <th class="px-4 py-2">Actions</th>
           </tr>
@@ -112,21 +112,21 @@
 let offset = 0;
 let autoRefreshTimer = null;
 let latestTimestamp = null;
-let filters = { ip: "", mac: "", hostname: "", method: "", type: "" };
+let filters = { ip: "", mac: "", domain: "", method: "", type: "" };
 let userAtTop = true;
 
 function renderRow(row) {
-  const hostname = row.hostname || "";
-  const blockButton = hostname ? `<button class="block-hostname-btn bg-red-500 text-white px-2 py-1 rounded text-xs hover:bg-red-600" data-hostname="${hostname}" data-action="block">Block</button>` : "";
+  const domain = row.domain || "";
+  const blockButton = domain ? `<button class="block-domain-btn bg-red-500 text-white px-2 py-1 rounded text-xs hover:bg-red-600" data-domain="${domain}" data-action="block">Block</button>` : "";
   return `
     <td class="px-4 py-2">${row.packet_timestamp}</td>
+    <td class="px-4 py-2">${row.domain || ""}</td>
     <td class="px-4 py-2">${row.src_ip}:${row.src_port}</td>
     <td class="px-4 py-2">${row.src_mac || ""}</td>
     <td class="px-4 py-2">${row.dst_ip}:${row.dst_port}</td>
     <td class="px-4 py-2">${row.dst_mac || ""}</td>
     <td class="px-4 py-2">${row.type}</td>
     <td class="px-4 py-2">${row.method}</td>
-    <td class="px-4 py-2">${row.hostname || ""}</td>
     <td class="px-4 py-2">${row.path || ""}</td>
     <td class="px-4 py-2">${blockButton}</td>
   `;
@@ -141,7 +141,7 @@ async function fetchLogs(reset=false, prepend=false) {
     limit: 200,
     ip: filters.ip,
     mac: filters.mac,
-    hostname: filters.hostname,
+    domain: filters.domain,
     method: filters.method,
     type: filters.type
   });
@@ -287,7 +287,7 @@ refreshSelect.addEventListener("change", () => {
 document.getElementById("apply-filters").addEventListener("click", () => {
   filters.ip = document.getElementById("filter-ip").value;
   filters.mac = document.getElementById("filter-mac").value;
-  filters.hostname = document.getElementById("filter-hostname").value;
+  filters.domain = document.getElementById("filter-domain").value;
   filters.method = document.getElementById("filter-method").value;
   filters.type = document.getElementById("filter-type").value;
   latestTimestamp = null;
@@ -295,7 +295,7 @@ document.getElementById("apply-filters").addEventListener("click", () => {
 });
 
 // Enter key support for filter inputs
-['filter-ip', 'filter-mac', 'filter-hostname'].forEach(id => {
+['filter-ip', 'filter-mac', 'filter-domain'].forEach(id => {
   const input = document.getElementById(id);
   const clearBtn = document.getElementById('clear-' + id.split('-')[1]);
   
@@ -322,26 +322,25 @@ document.getElementById("new-logs-banner").addEventListener("click", () => {
   document.getElementById("new-logs-banner").classList.add("hidden");
 });
 
-// Block hostname functionality
+// Block domain functionality
 document.addEventListener('click', async (e) => {
-  if (e.target.classList.contains('block-hostname-btn')) {
-    e.preventDefault();
-    const hostname = e.target.dataset.hostname;
-    const action = e.target.dataset.action; // 'block' or 'unblock'
+  if (e.target.classList.contains('block-domain-btn')) {
+    const domain = e.target.dataset.domain;
+    const action = e.target.dataset.action;
     
-    if (!hostname || !action) return;
+    if (!domain || !action) return;
     
-    const confirmMessage = action === 'block' 
-      ? `Block hostname "${hostname}"? This will add it to the system blocklist.`
-      : `Unblock hostname "${hostname}"? This will remove it from the system blocklist.`;
+    const confirmed = confirm(
+      action === 'block' 
+      ? `Block domain "${domain}"? This will add it to the system blocklist.`
+      : `Unblock domain "${domain}"? This will remove it from the system blocklist.`
+    );
     
-    if (!confirm(confirmMessage)) {
-      return;
-    }
+    if (!confirmed) return;
     
     try {
       const formData = new FormData();
-      formData.append('hostname', hostname);
+      formData.append('domain', domain);
       formData.append('action', action);
       
       const res = await fetch('block_hostname.php', {
@@ -349,39 +348,29 @@ document.addEventListener('click', async (e) => {
         body: formData
       });
       
-      // Check if the response is successful
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-      }
-      
       const data = await res.json();
       
-      if (data.status === 'ok') {
-        if (data.action === 'blocked') {
-          alert(data.message || `Hostname "${hostname}" has been blocked successfully!`);
-          e.target.textContent = 'Undo Block';
-          e.target.dataset.action = 'unblock';
-          e.target.classList.remove('bg-red-500', 'hover:bg-red-600');
-          e.target.classList.add('bg-orange-500', 'hover:bg-orange-600');
-        } else if (data.action === 'unblocked') {
-          alert(data.message || `Hostname "${hostname}" has been unblocked successfully!`);
-          e.target.textContent = 'Block';
-          e.target.dataset.action = 'block';
-          e.target.classList.remove('bg-orange-500', 'hover:bg-orange-600');
-          e.target.classList.add('bg-red-500', 'hover:bg-red-600');
+      if (data.success) {
+        if (action === 'block') {
+          alert(data.message || `Domain "${domain}" has been blocked successfully!`);
+        } else {
+          alert(data.message || `Domain "${domain}" has been unblocked successfully!`);
         }
+        // Refresh the page to show updated block status
+        location.reload();
       } else {
-        alert(`Failed to ${action} hostname: ${data.message}`);
+        alert(`Failed to ${action} domain: ${data.message}`);
       }
     } catch (error) {
-      alert('Network error. Please try again.');
+      console.error('Block/unblock error:', error);
+      alert(`Failed to ${action} domain: ${error.message}`);
     }
   }
 });
 
-// Function to check and update block button states for visible hostnames
+// Function to check and update block button states for visible domains
 async function updateBlockButtonStates() {
-  const buttons = document.querySelectorAll('.block-hostname-btn[data-action="block"]');
+  const buttons = document.querySelectorAll('.block-domain-btn[data-action="block"]');
   const hostnames = Array.from(buttons).map(btn => btn.dataset.hostname).filter((v, i, a) => a.indexOf(v) === i);
   
   if (hostnames.length === 0) return;

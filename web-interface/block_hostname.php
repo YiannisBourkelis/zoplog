@@ -1,5 +1,5 @@
 <?php
-// block_hostname.php - Add/remove hostname from system blocklist
+// block_hostname.php - Add/remove domain from system blocklist
 require_once __DIR__ . '/zoplog_config.php';
 
 header('Content-Type: application/json');
@@ -10,17 +10,17 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-$hostname = trim($_POST['hostname'] ?? '');
+$domain = trim($_POST['domain'] ?? '');
 $action = trim($_POST['action'] ?? 'block'); // 'block' or 'unblock'
 
-if (empty($hostname)) {
-    echo json_encode(['status' => 'error', 'message' => 'Hostname is required']);
+if (empty($domain)) {
+    echo json_encode(['status' => 'error', 'message' => 'Domain is required']);
     exit;
 }
 
-// Validate hostname format
-if (!preg_match('/^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/', $hostname)) {
-    echo json_encode(['status' => 'error', 'message' => 'Invalid hostname format']);
+// Validate domain format
+if (!preg_match('/^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/', $domain)) {
+    echo json_encode(['status' => 'error', 'message' => 'Invalid domain format']);
     exit;
 }
 
@@ -37,14 +37,14 @@ try {
     $isActive = $systemBlocklist['active'];
 
     if ($action === 'block') {
-        // Check if hostname already exists in system blocklist
+        // Check if domain already exists in system blocklist
         $existingRes = $mysqli->query("
             SELECT id FROM blocklist_domains
-            WHERE blocklist_id = $systemBlocklistId AND domain = '" . $mysqli->real_escape_string($hostname) . "'
+            WHERE blocklist_id = $systemBlocklistId AND domain = '" . $mysqli->real_escape_string($domain) . "'
         ");
 
         if ($existingRes && $existingRes->num_rows > 0) {
-            echo json_encode(['status' => 'error', 'message' => 'Hostname already blocked']);
+            echo json_encode(['status' => 'error', 'message' => 'Domain already blocked']);
             exit;
         }
 
@@ -57,33 +57,33 @@ try {
             $isActive = 'active';
         }
 
-        // Add hostname to system blocklist
+        // Add domain to system blocklist
         $stmt = $mysqli->prepare("INSERT INTO blocklist_domains (blocklist_id, domain) VALUES (?, ?)");
-        $stmt->bind_param("is", $systemBlocklistId, $hostname);
+        $stmt->bind_param("is", $systemBlocklistId, $domain);
 
         if ($stmt->execute()) {
-            echo json_encode(['status' => 'ok', 'message' => 'Hostname blocked successfully', 'action' => 'blocked']);
+            echo json_encode(['status' => 'ok', 'message' => 'Domain blocked successfully', 'action' => 'blocked']);
         } else {
-            echo json_encode(['status' => 'error', 'message' => 'Failed to block hostname']);
+            echo json_encode(['status' => 'error', 'message' => 'Failed to block domain']);
         }
 
         $stmt->close();
 
     } elseif ($action === 'unblock') {
-        // Check if hostname exists in system blocklist
+        // Check if domain exists in system blocklist
         $existingRes = $mysqli->query("
             SELECT id FROM blocklist_domains
-            WHERE blocklist_id = $systemBlocklistId AND domain = '" . $mysqli->real_escape_string($hostname) . "'
+            WHERE blocklist_id = $systemBlocklistId AND domain = '" . $mysqli->real_escape_string($domain) . "'
         ");
 
         if (!$existingRes || $existingRes->num_rows === 0) {
-            echo json_encode(['status' => 'error', 'message' => 'Hostname not found in blocklist']);
+            echo json_encode(['status' => 'error', 'message' => 'Domain not found in blocklist']);
             exit;
         }
 
         $domainId = $existingRes->fetch_assoc()['id'];
 
-        // Find all IPs associated with this hostname in the last 30 days
+        // Find all IPs associated with this domain in the last 30 days
         $stmt = $mysqli->prepare('
             SELECT DISTINCT ip.ip_address, ip.id as ip_id
             FROM ip_addresses ip
@@ -92,7 +92,7 @@ try {
             JOIN packet_logs pl ON pl.domain_id = d.id
             WHERE d.domain = ? AND pl.packet_timestamp >= DATE_SUB(NOW(), INTERVAL 30 DAY)
         ');
-        $stmt->bind_param('s', $hostname);
+        $stmt->bind_param('s', $domain);
         $stmt->execute();
         $ipResult = $stmt->get_result();
         $associatedIPs = [];
@@ -143,18 +143,18 @@ try {
             }
         }
 
-        // Remove hostname from system blocklist
+        // Remove domain from system blocklist
         $stmt = $mysqli->prepare("DELETE FROM blocklist_domains WHERE id = ?");
         $stmt->bind_param("i", $domainId);
 
         if ($stmt->execute()) {
-            $message = 'Hostname unblocked successfully';
+            $message = 'Domain unblocked successfully';
             if (!empty($removedIPs)) {
                 $message .= '. Removed ' . count($removedIPs) . ' associated IP(s) from firewall rules: ' . implode(', ', $removedIPs);
             }
             echo json_encode(['status' => 'ok', 'message' => $message, 'action' => 'unblocked']);
         } else {
-            echo json_encode(['status' => 'error', 'message' => 'Failed to unblock hostname']);
+            echo json_encode(['status' => 'error', 'message' => 'Failed to unblock domain']);
         }
 
         $stmt->close();

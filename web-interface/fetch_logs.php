@@ -9,7 +9,7 @@ $offset = intval($_GET["offset"] ?? 0);
 $limit = intval($_GET["limit"] ?? 200);
 $ip = $_GET["ip"] ?? "";
 $mac = $_GET["mac"] ?? "";
-$hostname = $_GET["hostname"] ?? "";
+$domain = $_GET["domain"] ?? "";
 $method = $_GET["method"] ?? "";
 $type = $_GET["type"] ?? "";
 $since = $_GET["since"] ?? "";
@@ -35,10 +35,10 @@ if ($mac) {
     $types .= "ss";
 }
 
-// Hostname filter
-if ($hostname) {
+// Domain filter
+if ($domain) {
     $where[] = "d.domain LIKE ?";
-    $params[] = "%$hostname%";
+    $params[] = "%$domain%";
     $types .= "s";
 }
 
