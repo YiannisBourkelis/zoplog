@@ -417,6 +417,68 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $message = "Error deleting backup file: " . $e->getMessage();
                 $messageType = 'error';
             }
+        } elseif ($_POST['action'] === 'delete_old_backups') {
+            try {
+                $backup_dir = __DIR__ . '/backups';
+                $deleted_count = 0;
+                $errors = [];
+
+                if (is_dir($backup_dir)) {
+                    $files = scandir($backup_dir);
+                    $backup_files = [];
+
+                    // Collect all backup files with their modification times
+                    foreach ($files as $file) {
+                        if ($file !== '.' && $file !== '..' && pathinfo($file, PATHINFO_EXTENSION) === 'zip') {
+                            $file_path = $backup_dir . '/' . $file;
+                            $backup_files[] = [
+                                'name' => $file,
+                                'path' => $file_path,
+                                'modified' => filemtime($file_path)
+                            ];
+                        }
+                    }
+
+                    // Sort by modification time (newest first)
+                    usort($backup_files, function($a, $b) {
+                        return $b['modified'] - $a['modified'];
+                    });
+
+                    // Delete all files except the most recent one
+                    if (count($backup_files) > 1) {
+                        for ($i = 1; $i < count($backup_files); $i++) {
+                            if (unlink($backup_files[$i]['path'])) {
+                                $deleted_count++;
+                            } else {
+                                $errors[] = "Failed to delete: " . htmlspecialchars($backup_files[$i]['name']);
+                            }
+                        }
+                    }
+
+                    if ($deleted_count > 0) {
+                        $message = "Successfully deleted {$deleted_count} old backup file(s). Kept the most recent backup.";
+                        $messageType = 'success';
+                    } else if (count($backup_files) <= 1) {
+                        $message = "No old backup files to delete. Only one backup file exists.";
+                        $messageType = 'info';
+                    } else {
+                        $message = "No files were deleted.";
+                        $messageType = 'warning';
+                    }
+
+                    if (!empty($errors)) {
+                        $message .= " Errors: " . implode(", ", $errors);
+                        $messageType = 'warning';
+                    }
+                } else {
+                    $message = "Backup directory not found.";
+                    $messageType = 'error';
+                }
+
+            } catch (Exception $e) {
+                $message = "Error deleting old backup files: " . $e->getMessage();
+                $messageType = 'error';
+            }
         }
     }
 }
@@ -731,12 +793,23 @@ $dbInfo = getDatabaseInfo();
 
             <?php if (!empty($backup_files)): ?>
             <div class="mt-6 border-t pt-6">
-                <h3 class="text-lg font-semibold mb-4 flex items-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                    </svg>
-                    Existing Backup Files (<?php echo count($backup_files); ?>)
-                </h3>
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-semibold flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                        </svg>
+                        Existing Backup Files (<?php echo count($backup_files); ?>)
+                    </h3>
+                    <?php if (count($backup_files) > 1): ?>
+                    <button type="button" id="deleteOldBackupsBtn"
+                            class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition duration-200">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                        </svg>
+                        Delete Old Backups
+                    </button>
+                    <?php endif; ?>
+                </div>
                 <div class="overflow-x-auto">
                     <table class="min-w-full table-auto">
                         <thead>
@@ -988,6 +1061,31 @@ $dbInfo = getDatabaseInfo();
                     cell.textContent = localTimeString;
                 }
             });
+        });
+
+        // Handle delete old backups button
+        document.addEventListener('DOMContentLoaded', function() {
+            const deleteOldBackupsBtn = document.getElementById('deleteOldBackupsBtn');
+            if (deleteOldBackupsBtn) {
+                deleteOldBackupsBtn.addEventListener('click', function() {
+                    const confirmMessage = 'Are you sure you want to delete all backup files except the most recent one? This action cannot be undone.';
+                    if (confirm(confirmMessage)) {
+                        // Create and submit a form for the deletion
+                        const form = document.createElement('form');
+                        form.method = 'POST';
+                        form.style.display = 'none';
+
+                        const actionInput = document.createElement('input');
+                        actionInput.type = 'hidden';
+                        actionInput.name = 'action';
+                        actionInput.value = 'delete_old_backups';
+
+                        form.appendChild(actionInput);
+                        document.body.appendChild(form);
+                        form.submit();
+                    }
+                });
+            }
         });
     </script>
 </body>
