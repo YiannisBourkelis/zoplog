@@ -198,40 +198,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $tables_result->free();
 
-                // Create SQL dump
-                $sql_content = "-- ZopLog Database Backup\n";
-                $sql_content .= "-- Generated on: " . date('Y-m-d H:i:s') . "\n";
-                $sql_content .= "-- Database: {$db_name}\n\n";
+                // Create SQL dump - write directly to file to avoid memory issues
+                $sql_file = fopen($sql_filepath, 'w');
+                if (!$sql_file) {
+                    throw new Exception("Cannot create SQL file: $sql_filepath");
+                }
 
-                $sql_content .= "SET FOREIGN_KEY_CHECKS = 0;\n\n";
+                // Write header
+                fwrite($sql_file, "-- ZopLog Database Backup\n");
+                fwrite($sql_file, "-- Generated on: " . date('Y-m-d H:i:s') . "\n");
+                fwrite($sql_file, "-- Database: {$db_name}\n\n");
+                fwrite($sql_file, "SET FOREIGN_KEY_CHECKS = 0;\n\n");
 
                 foreach ($tables as $table) {
                     // Get table structure
                     $create_result = $mysqli->query("SHOW CREATE TABLE `$table`");
                     $create_row = $create_result->fetch_assoc();
-                    $sql_content .= "-- Table structure for `$table`\n";
-                    $sql_content .= $create_row['Create Table'] . ";\n\n";
+                    fwrite($sql_file, "-- Table structure for `$table`\n");
+                    fwrite($sql_file, $create_row['Create Table'] . ";\n\n");
                     $create_result->free();
 
                     // Get table data
                     $data_result = $mysqli->query("SELECT * FROM `$table`");
                     if ($data_result->num_rows > 0) {
-                        $sql_content .= "-- Data for `$table`\n";
+                        fwrite($sql_file, "-- Data for `$table`\n");
                         while ($row = $data_result->fetch_assoc()) {
                             $values = array_map(function($value) use ($mysqli) {
                                 return $value === null ? 'NULL' : "'" . $mysqli->real_escape_string($value) . "'";
                             }, $row);
-                            $sql_content .= "INSERT INTO `$table` VALUES (" . implode(', ', $values) . ");\n";
+                            fwrite($sql_file, "INSERT INTO `$table` VALUES (" . implode(', ', $values) . ");\n");
                         }
-                        $sql_content .= "\n";
+                        fwrite($sql_file, "\n");
                     }
                     $data_result->free();
                 }
 
-                $sql_content .= "SET FOREIGN_KEY_CHECKS = 1;\n";
-
-                // Write SQL file
-                file_put_contents($sql_filepath, $sql_content);
+                fwrite($sql_file, "SET FOREIGN_KEY_CHECKS = 1;\n");
+                fclose($sql_file);
 
                 // Create ZIP file
                 $zip = new ZipArchive();
