@@ -42,12 +42,12 @@ try {
         be.message,
         CASE
             WHEN be.direction = 'IN' THEN be.src_ip_id
-            WHEN be.direction = 'OUT' THEN be.dst_ip_id
+            WHEN be.direction IN ('OUT', 'FWD') THEN be.dst_ip_id
             ELSE be.src_ip_id
         END AS primary_ip_id,
         CASE
             WHEN be.direction = 'IN' THEN src_ip.ip_address
-            WHEN be.direction = 'OUT' THEN dst_ip.ip_address
+            WHEN be.direction IN ('OUT', 'FWD') THEN dst_ip.ip_address
             ELSE src_ip.ip_address
         END AS primary_ip,
         GROUP_CONCAT(DISTINCT d.domain ORDER BY d.domain SEPARATOR '|') AS all_hostnames
@@ -57,7 +57,7 @@ try {
     LEFT JOIN domain_ip_addresses dia ON dia.ip_address_id = (
         CASE
             WHEN be.direction = 'IN' THEN be.src_ip_id
-            WHEN be.direction = 'OUT' THEN be.dst_ip_id
+            WHEN be.direction IN ('OUT', 'FWD') THEN be.dst_ip_id
             ELSE be.src_ip_id
         END
     ) AND dia.last_seen >= DATE_SUB(NOW(), INTERVAL 1 DAY)
