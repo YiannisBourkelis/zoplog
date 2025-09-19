@@ -167,6 +167,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $messageType = 'error';
             }
         } elseif ($_POST['action'] === 'backup_database') {
+            // Increase execution time for large backups
+            set_time_limit(1800); // 30 minutes execution time
+            ini_set('max_execution_time', 1800);
+
+            // Log that backup started
+            error_log("Backup started at " . date('Y-m-d H:i:s'));
             try {
                 // Get database name
                 $db_result = $mysqli->query("SELECT DATABASE() as db_name");
@@ -183,8 +189,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                // Generate filename with timestamp
-                $timestamp = date('Y-m-d_H-i-s');
+                // Create test file to verify PHP execution
+                $test_file = $backup_dir . '/test_execution_' . time() . '.txt';
+                file_put_contents($test_file, 'PHP execution test at ' . date('Y-m-d H:i:s'));
+                error_log("Test file created: $test_file");
+
+                // Generate filename with timestamp - use provided timestamp or generate new one
+                $timestamp = $_POST['timestamp'] ?? date('Y-m-d_H-i-s');
                 $sql_filename = "backup_{$db_name}_{$timestamp}.sql";
                 $zip_filename = "backup_{$db_name}_{$timestamp}.zip";
                 $sql_filepath = $backup_dir . '/' . $sql_filename;
@@ -198,43 +209,115 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $tables_result->free();
 
-                // Create SQL dump - write directly to file to avoid memory issues
+                // Add a small delay to ensure progress is visible
+                sleep(2);
+
+                // Create SQL dump - use buffered writing to balance memory usage and performance
                 $sql_file = fopen($sql_filepath, 'w');
                 if (!$sql_file) {
                     throw new Exception("Cannot create SQL file: $sql_filepath");
                 }
 
+                // Buffer size: ~10MB to balance memory usage and I/O performance
+                $buffer_size = 10 * 1024 * 1024; // 10MB
+                $buffer = '';
+                $total_tables = count($tables);
+                $processed_tables = 0;
+
                 // Write header
-                fwrite($sql_file, "-- ZopLog Database Backup\n");
-                fwrite($sql_file, "-- Generated on: " . date('Y-m-d H:i:s') . "\n");
-                fwrite($sql_file, "-- Database: {$db_name}\n\n");
-                fwrite($sql_file, "SET FOREIGN_KEY_CHECKS = 0;\n\n");
+                $header = "-- ZopLog Database Backup\n";
+                $header .= "-- Generated on: " . date('Y-m-d H:i:s') . "\n";
+                $header .= "-- Database: {$db_name}\n\n";
+                $header .= "SET FOREIGN_KEY_CHECKS = 0;\n\n";
+                fwrite($sql_file, $header);
+
+                // Create progress file
+                $progress_file = $backup_dir . '/backup_progress_' . $timestamp . '.json';
+                $initial_progress = json_encode([
+                    'status' => 'starting',
+                    'total_tables' => $total_tables,
+                    'processed_tables' => 0,
+                    'current_table' => '',
+                    'percentage' => 0,
+                    'start_time' => time()
+                ]);
+                file_put_contents($progress_file, $initial_progress);
+                error_log("Progress file created: $progress_file with content: $initial_progress");
+
+                function flush_buffer($buffer, $sql_file) {
+                    if (!empty($buffer)) {
+                        fwrite($sql_file, $buffer);
+                        return '';
+                    }
+                    return $buffer;
+                }
 
                 foreach ($tables as $table) {
+                    $processed_tables++;
+
+                    // Update progress
+                    file_put_contents($progress_file, json_encode([
+                        'status' => 'processing',
+                        'total_tables' => $total_tables,
+                        'processed_tables' => $processed_tables,
+                        'current_table' => $table,
+                        'percentage' => round(($processed_tables / $total_tables) * 100, 1),
+                        'start_time' => time()
+                    ]));
+
                     // Get table structure
                     $create_result = $mysqli->query("SHOW CREATE TABLE `$table`");
                     $create_row = $create_result->fetch_assoc();
-                    fwrite($sql_file, "-- Table structure for `$table`\n");
-                    fwrite($sql_file, $create_row['Create Table'] . ";\n\n");
+                    $table_sql = "\n-- Table structure for `$table`\n";
+                    $table_sql .= $create_row['Create Table'] . ";\n\n";
                     $create_result->free();
+
+                    // Check if buffer needs flushing
+                    if (strlen($buffer) + strlen($table_sql) > $buffer_size) {
+                        $buffer = flush_buffer($buffer, $sql_file);
+                    }
+                    $buffer .= $table_sql;
 
                     // Get table data
                     $data_result = $mysqli->query("SELECT * FROM `$table`");
                     if ($data_result->num_rows > 0) {
-                        fwrite($sql_file, "-- Data for `$table`\n");
+                        $data_header = "-- Data for `$table`\n";
+                        if (strlen($buffer) + strlen($data_header) > $buffer_size) {
+                            $buffer = flush_buffer($buffer, $sql_file);
+                        }
+                        $buffer .= $data_header;
+
                         while ($row = $data_result->fetch_assoc()) {
                             $values = array_map(function($value) use ($mysqli) {
                                 return $value === null ? 'NULL' : "'" . $mysqli->real_escape_string($value) . "'";
                             }, $row);
-                            fwrite($sql_file, "INSERT INTO `$table` VALUES (" . implode(', ', $values) . ");\n");
+                            $insert_sql = "INSERT INTO `$table` VALUES (" . implode(', ', $values) . ");\n";
+
+                            // Check if buffer needs flushing
+                            if (strlen($buffer) + strlen($insert_sql) > $buffer_size) {
+                                $buffer = flush_buffer($buffer, $sql_file);
+                            }
+                            $buffer .= $insert_sql;
                         }
-                        fwrite($sql_file, "\n");
+                        $buffer .= "\n";
                     }
                     $data_result->free();
                 }
 
+                // Write final buffer and footer
+                flush_buffer($buffer, $sql_file);
                 fwrite($sql_file, "SET FOREIGN_KEY_CHECKS = 1;\n");
                 fclose($sql_file);
+
+                // Update progress to completed
+                file_put_contents($progress_file, json_encode([
+                    'status' => 'completed',
+                    'total_tables' => $total_tables,
+                    'processed_tables' => $processed_tables,
+                    'current_table' => '',
+                    'percentage' => 100,
+                    'start_time' => time()
+                ]));
 
                 // Create ZIP file
                 $zip = new ZipArchive();
@@ -258,7 +341,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
 
                     $message = "Database backup created successfully! <a href='backups/{$zip_filename}' class='text-blue-600 underline' download>Click here to download</a>";
+                    $message .= "<!-- BACKUP_TIMESTAMP:{$timestamp} -->"; // Hidden marker for JavaScript
                     $messageType = 'success';
+
+                    // Update progress to completed before cleanup
+                    $completed_progress = json_encode([
+                        'status' => 'completed',
+                        'total_tables' => $total_tables,
+                        'processed_tables' => $total_tables,
+                        'current_table' => 'Backup completed',
+                        'percentage' => 100,
+                        'start_time' => time()
+                    ]);
+                    file_put_contents($progress_file, $completed_progress);
+
+                    // Clean up progress file after a short delay
+                    sleep(2); // Give JavaScript time to detect completion
+                    if (file_exists($progress_file)) {
+                        unlink($progress_file);
+                    }
 
                 } else {
                     throw new Exception("Failed to create ZIP file");
@@ -267,6 +368,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } catch (Exception $e) {
                 $message = "Error creating database backup: " . $e->getMessage();
                 $messageType = 'error';
+
+                // Clean up progress file on error
+                if (isset($progress_file) && file_exists($progress_file)) {
+                    unlink($progress_file);
+                }
             }
         } elseif ($_POST['action'] === 'delete_backup') {
             try {
@@ -554,9 +660,10 @@ $dbInfo = getDatabaseInfo();
                     </button>
                 </form>
 
-                <form method="POST" class="space-y-4">
+                <form method="POST" class="space-y-4" id="backupForm">
                     <input type="hidden" name="action" value="backup_database">
-                    <button type="submit"
+                    <input type="hidden" name="timestamp" id="backupTimestamp">
+                    <button type="submit" id="backupBtn"
                             class="w-full bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition duration-200 flex items-center justify-center">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
@@ -564,6 +671,20 @@ $dbInfo = getDatabaseInfo();
                         Backup Database
                     </button>
                 </form>
+
+                <!-- Progress Bar -->
+                <div id="progressContainer" class="mt-4 hidden">
+                    <div class="bg-gray-200 rounded-full h-4 mb-2">
+                        <div id="progressBar" class="bg-purple-600 h-4 rounded-full transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                    <div class="text-sm text-gray-600">
+                        <span id="progressText">Preparing backup...</span>
+                        <span id="progressPercent" class="font-semibold">0%</span>
+                    </div>
+                    <div class="text-xs text-gray-500 mt-1">
+                        <span id="currentTable">Initializing...</span>
+                    </div>
+                </div>
             </div>
             <div class="mt-4 text-sm text-gray-600">
                 <p><strong>Optimize Tables:</strong> Reorganizes table data and indexes for better performance.</p>
@@ -658,5 +779,121 @@ $dbInfo = getDatabaseInfo();
 
         <?php endif; ?>
     </div>
+
+    <script>
+        // Backup progress monitoring
+        document.addEventListener('DOMContentLoaded', function() {
+            const backupForm = document.getElementById('backupForm');
+            const backupBtn = document.getElementById('backupBtn');
+            const progressContainer = document.getElementById('progressContainer');
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            const progressPercent = document.getElementById('progressPercent');
+            const currentTable = document.getElementById('currentTable');
+            const backupTimestamp = document.getElementById('backupTimestamp');
+
+            let progressInterval = null;
+
+            // Handle backup form submission
+            backupForm.addEventListener('submit', function(e) {
+                e.preventDefault();
+
+                // Generate timestamp for this backup
+                const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '-');
+                backupTimestamp.value = timestamp;
+
+                // Show progress container
+                progressContainer.classList.remove('hidden');
+                progressText.textContent = 'Starting backup...';
+                progressPercent.textContent = '0%';
+                currentTable.textContent = 'Initializing...';
+                progressBar.style.width = '0%';
+
+                // Disable button and show loading
+                backupBtn.disabled = true;
+                backupBtn.innerHTML = '<svg class="animate-spin h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Creating Backup...';
+
+                // Start progress monitoring
+                startProgressMonitoring(timestamp);
+
+                // Submit the form
+                const formData = new FormData(backupForm);
+                fetch('database.php', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.text())
+                .then(html => {
+                    // Stop progress monitoring
+                    stopProgressMonitoring();
+
+                    // Parse the response to extract the message
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(html, 'text/html');
+                    const messageDiv = doc.querySelector('.bg-green-100, .bg-red-100');
+
+                    if (messageDiv) {
+                        // Since the backup completed successfully, reload the page to ensure all UI is updated
+                        // This is the most reliable way to update the backup files list and reset the button
+                        console.log('Backup completed successfully, reloading page to update UI');
+                        location.reload();
+                    } else {
+                        // If no message found, reload the page anyway
+                        console.log('No success/error message found in response, refreshing page');
+                        location.reload();
+                    }
+                })
+                .catch(error => {
+                    console.error('Backup error:', error);
+                    stopProgressMonitoring();
+                    progressText.textContent = 'Error occurred during backup';
+                    progressPercent.textContent = 'Error';
+                    backupBtn.disabled = false;
+                    backupBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg> Backup Database';
+                });
+            });
+
+            function startProgressMonitoring(timestamp) {
+                progressInterval = setInterval(() => {
+                    fetch(`backup_progress.php?timestamp=${timestamp}`)
+                        .then(response => {
+                            if (response.status === 404) {
+                                // Progress file not found - backup might be complete or not started
+                                console.log('Progress file not found - backup may be complete');
+                                return null;
+                            }
+                            if (!response.ok) {
+                                throw new Error('Progress request failed');
+                            }
+                            return response.json();
+                        })
+                        .then(data => {
+                            if (data === null) {
+                                // Progress file not found - backup is likely complete
+                                // The main fetch will handle the completion when it returns
+                                console.log('Progress file not found - backup may be complete');
+                                return;
+                            }
+
+                            if (data && data.status) {
+                                updateProgress(data);
+                            }
+                        })
+                        .catch(error => {
+                            console.log('Progress monitoring:', error.message);
+                        });
+                }, 500); // Poll every 500ms for faster updates
+            }
+
+            function stopProgressMonitoring() {
+                if (progressInterval) {
+                    clearInterval(progressInterval);
+                    progressInterval = null;
+                }
+            }
+
+
+        });
+    </script>
 </body>
 </html>
