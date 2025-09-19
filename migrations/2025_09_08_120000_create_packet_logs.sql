@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS `blocked_events` (
   `direction` enum('IN','OUT','FWD') NOT NULL,
   `src_ip_id` bigint(20) UNSIGNED DEFAULT NULL,
   `dst_ip_id` bigint(20) UNSIGNED DEFAULT NULL,
+  `wan_ip_id` bigint(20) UNSIGNED DEFAULT NULL,
   `src_port` int(11) DEFAULT NULL,
   `dst_port` int(11) DEFAULT NULL,
   `proto` varchar(8) DEFAULT NULL,
@@ -58,8 +59,10 @@ CREATE TABLE IF NOT EXISTS `blocked_events` (
   KEY `idx_direction` (`direction`),
   KEY `idx_src_ip` (`src_ip_id`),
   KEY `idx_dst_ip` (`dst_ip_id`),
+  KEY `idx_wan_ip` (`wan_ip_id`),
   KEY `idx_event_time_ip_port` (`event_time`, `src_ip_id`, `dst_ip_id`, `dst_port`),
   KEY `idx_dst_ip_event_time` (`dst_ip_id`, `event_time`),
   CONSTRAINT `fk_blocked_events_src_ip` FOREIGN KEY (`src_ip_id`) REFERENCES `ip_addresses` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `fk_blocked_events_dst_ip` FOREIGN KEY (`dst_ip_id`) REFERENCES `ip_addresses` (`id`) ON DELETE SET NULL
+  CONSTRAINT `fk_blocked_events_dst_ip` FOREIGN KEY (`dst_ip_id`) REFERENCES `ip_addresses` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_blocked_events_wan_ip` FOREIGN KEY (`wan_ip_id`) REFERENCES `ip_addresses` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
