@@ -35,35 +35,24 @@ try {
         src_ip.ip_address src_ip_address,
         be.dst_ip_id,
         dst_ip.ip_address dst_ip_address,
+        be.wan_ip_id,
+        wan_ip.ip_address wan_ip_address,
         be.src_port,
         be.dst_port,
         be.iface_in,
         be.iface_out,
         be.message,
-        CASE
-            WHEN be.direction = 'IN' THEN be.src_ip_id
-            WHEN be.direction IN ('OUT', 'FWD') THEN be.dst_ip_id
-            ELSE be.src_ip_id
-        END AS primary_ip_id,
-        CASE
-            WHEN be.direction = 'IN' THEN src_ip.ip_address
-            WHEN be.direction IN ('OUT', 'FWD') THEN dst_ip.ip_address
-            ELSE src_ip.ip_address
-        END AS primary_ip,
+        be.wan_ip_id AS primary_ip_id,
+        wan_ip.ip_address AS primary_ip,
         GROUP_CONCAT(DISTINCT d.domain ORDER BY d.domain SEPARATOR '|') AS all_hostnames
     FROM blocked_events be
     LEFT JOIN ip_addresses src_ip ON be.src_ip_id = src_ip.id
     LEFT JOIN ip_addresses dst_ip ON be.dst_ip_id = dst_ip.id
-    LEFT JOIN domain_ip_addresses dia ON dia.ip_address_id = (
-        CASE
-            WHEN be.direction = 'IN' THEN be.src_ip_id
-            WHEN be.direction IN ('OUT', 'FWD') THEN be.dst_ip_id
-            ELSE be.src_ip_id
-        END
-    ) AND dia.last_seen >= DATE_SUB(NOW(), INTERVAL 1 DAY)
+    LEFT JOIN ip_addresses wan_ip ON be.wan_ip_id = wan_ip.id
+    LEFT JOIN domain_ip_addresses dia ON dia.ip_address_id = be.wan_ip_id AND dia.last_seen >= DATE_SUB(NOW(), INTERVAL 1 DAY)
     LEFT JOIN domains d ON dia.domain_id = d.id
     {$where_clause}
-    GROUP BY be.id, be.event_time, be.direction, be.proto, be.src_ip_id, be.dst_ip_id,
+    GROUP BY be.id, be.event_time, be.direction, be.proto, be.src_ip_id, be.dst_ip_id, be.wan_ip_id,
              be.src_port, be.dst_port, be.iface_in, be.iface_out, be.message
     ORDER BY be.id DESC
     LIMIT {$limit}";
@@ -94,6 +83,7 @@ try {
             'latest_iface_in' => $row['iface_in'],
             'latest_iface_out' => $row['iface_out'],
             'latest_message' => $row['message'],
+            //'latest_message' => substr($row['message'], 0, 200) . (strlen($row['message']) > 200 ? '...' : ''),
         ];
     }
 

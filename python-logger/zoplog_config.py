@@ -10,6 +10,7 @@ from typing import Dict, Any
 
 DEFAULT_CONFIG_PATHS = [
     "/etc/zoplog/database.conf",
+    "/etc/zoplog/zoplog.conf",
 ]
 
 def _strip_quotes(value: str) -> str:

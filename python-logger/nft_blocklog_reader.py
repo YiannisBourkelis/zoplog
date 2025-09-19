@@ -12,7 +12,7 @@ import re
 import sys
 from typing import Dict, Optional, Tuple
 
-from zoplog_config import load_database_config
+from zoplog_config import load_database_config, DEFAULT_MONITOR_INTERFACE
 
 # Get database configuration
 DB_CONFIG = load_database_config()
@@ -60,6 +60,24 @@ def get_or_insert_ip(cursor, ip: Optional[str]) -> Optional[int]:
         (ip,),
     )
     return cursor.lastrowid
+
+def get_wan_ip_id(direction: str, src_ip_id: Optional[int], dst_ip_id: Optional[int], iface_in: Optional[str], iface_out: Optional[str], monitoring_interface: str) -> Optional[int]:
+    """
+    Determine the WAN IP ID based on direction, interface information, and monitoring interface.
+    The monitoring interface is the WAN-facing interface.
+    """
+    if direction == 'IN' and iface_in == monitoring_interface:
+        return src_ip_id
+    elif direction == 'OUT' and iface_out == monitoring_interface:
+        return dst_ip_id
+    elif direction == 'FWD' and iface_out == monitoring_interface:
+        return dst_ip_id
+    # Fallback to old logic if interface doesn't match
+    if direction == 'IN':
+        return src_ip_id
+    elif direction in ('OUT', 'FWD'):
+        return dst_ip_id
+    return None
 
 # Inject a space right after the prefix token if glued (e.g., ...-OUTIN=)
 def _normalize_prefix_spacing(msg: str) -> str:
@@ -131,13 +149,15 @@ def insert_block_event(conn, cursor, direction: str, fields: Dict[str, str], raw
     src_ip_id = get_or_insert_ip(cursor, src_ip)
     dst_ip_id = get_or_insert_ip(cursor, dst_ip)
 
+    wan_ip_id = get_wan_ip_id(direction, src_ip_id, dst_ip_id, iface_in, iface_out, DEFAULT_MONITOR_INTERFACE)
+
     cursor.execute(
         """
         INSERT INTO blocked_events
-          (event_time, direction, src_ip_id, dst_ip_id, src_port, dst_port, proto, iface_in, iface_out, message)
-        VALUES (NOW(), %s, %s, %s, %s, %s, %s, %s, %s, %s)
+          (event_time, direction, src_ip_id, dst_ip_id, wan_ip_id, src_port, dst_port, proto, iface_in, iface_out, message)
+        VALUES (NOW(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
-        (direction, src_ip_id, dst_ip_id, src_port, dst_port, proto, iface_in, iface_out, raw[:65535]),
+        (direction, src_ip_id, dst_ip_id, wan_ip_id, src_port, dst_port, proto, iface_in, iface_out, raw[:65535]),
     )
 
 def journal_reader():
