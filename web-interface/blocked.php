@@ -418,7 +418,6 @@ function renderRow(row) {
   const dstIp = row.latest_dst_ip || 'N/A';
   const ifaceIn = row.latest_iface_in || '';
   const ifaceOut = row.latest_iface_out || '';
-  const message = row.latest_message || '';
   
   // Format the event time to show date and time on separate lines
   const formattedTime = formatEventTime(eventTime);
@@ -450,7 +449,11 @@ function renderRow(row) {
     <td class="px-4 py-2">${dstIp}</td>
     <td class="px-4 py-2">${ifaceIn}</td>
     <td class="px-4 py-2">${ifaceOut}</td>
-    <td class="px-4 py-2 truncate-cell" title="${message.replace(/"/g, '&quot;')}">${message}</td>
+    <td class="px-4 py-2">
+      <button onclick="showMessage(${row.id})" class="text-blue-600 hover:text-blue-800 underline text-sm">
+        View Message
+      </button>
+    </td>
     <div class="hover-actions">${actions}</div>
   `;
 }
@@ -701,6 +704,40 @@ function showTemporaryMessage(message, type = 'success') {
   }, 3000);
 }
 
+// Function to show message in a modal
+async function showMessage(id) {
+  try {
+    const res = await fetch(`fetch_message.php?id=${id}`);
+    const data = await res.json();
+    
+    if (data.message) {
+      // Create modal
+      const modal = document.createElement('div');
+      modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+      modal.innerHTML = `
+        <div class="bg-white p-6 rounded-lg max-w-4xl max-h-96 overflow-auto">
+          <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-semibold">Blocked Event Message</h3>
+            <button onclick="this.closest('.fixed').remove()" class="text-gray-500 hover:text-gray-700">&times;</button>
+          </div>
+          <pre class="whitespace-pre-wrap text-sm">${data.message}</pre>
+        </div>
+      `;
+      document.body.appendChild(modal);
+      
+      // Close on background click
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.remove();
+      });
+    } else {
+      showTemporaryMessage('Message not found', 'error');
+    }
+  } catch (err) {
+    console.error('Error fetching message:', err);
+    showTemporaryMessage('Error loading message', 'error');
+  }
+}
+
 // Function to toggle child rows visibility
 function toggleChildren(toggleElement, rowId) {
   console.log("toggleChildren called with:", toggleElement, rowId);
@@ -821,7 +858,11 @@ async function fetchBlocked(reset=false, prepend=false) {
             <td>${row.latest_dst_ip || ''}</td>
             <td>${row.latest_iface_in || ''}</td>
             <td>${row.latest_iface_out || ''}</td>
-            <td class="message-cell">${(row.latest_message || '').replace(/"/g, '&quot;').substring(0, 100)}${(row.latest_message || '').length > 100 ? '...' : ''}</td>
+            <td>
+              <button onclick="showMessage(${row.id})" class="px-3 py-1 text-xs bg-blue-500 hover:bg-blue-600 text-white rounded-md transition-colors duration-200 shadow-sm">
+                View Message
+              </button>
+            </td>
             <td>
               <div class="hover-actions" style="display: none;">
                 <button onclick="addToWhitelist('all-ip-${row.primary_ip}', '${allHostnames.join(', ')}', '${allHostnames.join(', ')}')" class="whitelist-btn">Whitelist All Domains (${allHostnames.length})</button>
@@ -910,7 +951,11 @@ async function fetchBlocked(reset=false, prepend=false) {
           <td>${row.latest_dst_ip || ''}</td>
           <td>${row.latest_iface_in || ''}</td>
           <td>${row.latest_iface_out || ''}</td>
-          <td class="message-cell">${(row.latest_message || '').replace(/"/g, '&quot;').substring(0, 100)}${(row.latest_message || '').length > 100 ? '...' : ''}</td>
+          <td>
+            <button onclick="showMessage(${row.id})" class="px-3 py-1 text-xs bg-blue-500 hover:bg-blue-600 text-white rounded-md transition-colors duration-200 shadow-sm">
+              View Message
+            </button>
+          </td>
           <td>
             <div class="hover-actions" style="display: none;">
               <button onclick="addToWhitelist('all-ip-${row.primary_ip}', '${allHostnames.join(', ')}', '${allHostnames.join(', ')}')" class="whitelist-btn">Whitelist All Domains (${allHostnames.length})</button>

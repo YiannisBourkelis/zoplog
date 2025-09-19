@@ -41,7 +41,6 @@ try {
         be.dst_port,
         be.iface_in,
         be.iface_out,
-        be.message,
         be.wan_ip_id AS primary_ip_id,
         wan_ip.ip_address AS primary_ip,
         GROUP_CONCAT(DISTINCT d.domain ORDER BY d.domain SEPARATOR '|') AS all_hostnames
@@ -53,7 +52,7 @@ try {
     LEFT JOIN domains d ON dia.domain_id = d.id
     {$where_clause}
     GROUP BY be.id, be.event_time, be.direction, be.proto, be.src_ip_id, be.dst_ip_id, be.wan_ip_id,
-             be.src_port, be.dst_port, be.iface_in, be.iface_out, be.message
+             be.src_port, be.dst_port, be.iface_in, be.iface_out
     ORDER BY be.id DESC
     LIMIT {$limit}";
 
@@ -82,7 +81,6 @@ try {
             'latest_dst_ip' => $row['dst_ip_address'],
             'latest_iface_in' => $row['iface_in'],
             'latest_iface_out' => $row['iface_out'],
-            'latest_message' => $row['message'],
             //'latest_message' => substr($row['message'], 0, 200) . (strlen($row['message']) > 200 ? '...' : ''),
         ];
     }
