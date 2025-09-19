@@ -180,6 +180,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $db_name = $db_row['db_name'];
                 $db_result->free();
 
+                // Record initial start time for progress tracking
+                $initial_start_time = time();
+
                 // Create backup directory - use system temp if web directory is not writable
                 $backup_dir = __DIR__ . '/backups';
                 if (!is_dir($backup_dir) || !is_writable($backup_dir)) {
@@ -255,15 +258,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 foreach ($tables as $table) {
                     $processed_tables++;
 
-                    // Update progress
-                    file_put_contents($progress_file, json_encode([
+                    // Get table row count for progress display
+                    $count_result = $mysqli->query("SELECT COUNT(*) as row_count FROM `$table`");
+                    $count_row = $count_result->fetch_assoc();
+                    $table_row_count = $count_row['row_count'];
+                    $count_result->free();
+
+                    // Update progress with detailed information
+                    $progress_data = [
                         'status' => 'processing',
                         'total_tables' => $total_tables,
                         'processed_tables' => $processed_tables,
                         'current_table' => $table,
+                        'current_table_rows' => $table_row_count,
                         'percentage' => round(($processed_tables / $total_tables) * 100, 1),
-                        'start_time' => time()
-                    ]));
+                        'start_time' => time(),
+                        'elapsed_time' => time() - $initial_start_time
+                    ];
+                    file_put_contents($progress_file, json_encode($progress_data));
 
                     // Get table structure
                     $create_result = $mysqli->query("SHOW CREATE TABLE `$table`");
@@ -744,7 +756,7 @@ $dbInfo = getDatabaseInfo();
                                 <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">
                                     <?php echo number_format($file['size'] / 1024 / 1024, 2); ?> MB
                                 </td>
-                                <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">
+                                <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500" data-timestamp="<?php echo $file['modified']; ?>">
                                     <?php echo date('Y-m-d H:i:s', $file['modified']); ?>
                                 </td>
                                 <td class="px-4 py-2 whitespace-nowrap text-sm space-x-2">
@@ -798,8 +810,15 @@ $dbInfo = getDatabaseInfo();
             backupForm.addEventListener('submit', function(e) {
                 e.preventDefault();
 
-                // Generate timestamp for this backup
-                const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '-');
+                // Generate timestamp for this backup using user's local timezone
+                const now = new Date();
+                const year = now.getFullYear();
+                const month = String(now.getMonth() + 1).padStart(2, '0');
+                const day = String(now.getDate()).padStart(2, '0');
+                const hours = String(now.getHours()).padStart(2, '0');
+                const minutes = String(now.getMinutes()).padStart(2, '0');
+                const seconds = String(now.getSeconds()).padStart(2, '0');
+                const timestamp = `${year}-${month}-${day}_${hours}-${minutes}-${seconds}`;
                 backupTimestamp.value = timestamp;
 
                 // Show progress container
@@ -892,7 +911,83 @@ $dbInfo = getDatabaseInfo();
                 }
             }
 
+            function updateProgress(data) {
+                if (data.status === 'starting') {
+                    progressText.textContent = 'Initializing backup...';
+                    progressPercent.textContent = '0%';
+                    currentTable.textContent = 'Preparing tables...';
+                    progressBar.style.width = '0%';
+                } else if (data.status === 'processing') {
+                    const percentage = Math.round(data.percentage);
+                    progressPercent.textContent = percentage + '%';
+                    progressBar.style.width = percentage + '%';
 
+                    if (data.current_table) {
+                        let tableInfo = `Table ${data.processed_tables} of ${data.total_tables}: ${data.current_table}`;
+                        if (data.current_table_rows !== undefined) {
+                            tableInfo += ` (${data.current_table_rows.toLocaleString()} rows)`;
+                        }
+                        progressText.textContent = `Backing up: ${data.current_table}`;
+                        currentTable.textContent = tableInfo;
+                    } else {
+                        progressText.textContent = 'Processing tables...';
+                        currentTable.textContent = `Table ${data.processed_tables} of ${data.total_tables}`;
+                    }
+
+                    // Add estimated time remaining
+                    if (data.elapsed_time > 0 && data.processed_tables > 0) {
+                        const avgTimePerTable = data.elapsed_time / data.processed_tables;
+                        const remainingTables = data.total_tables - data.processed_tables;
+                        const estimatedRemaining = Math.round(avgTimePerTable * remainingTables);
+
+                        if (estimatedRemaining > 0) {
+                            let timeText = '';
+                            if (estimatedRemaining < 60) {
+                                timeText = `~${estimatedRemaining}s`;
+                            } else {
+                                const minutes = Math.floor(estimatedRemaining / 60);
+                                const seconds = estimatedRemaining % 60;
+                                timeText = `~${minutes}m ${seconds}s`;
+                            }
+                            currentTable.textContent += ` - ${timeText} remaining`;
+                        }
+                    }
+                } else if (data.status === 'completed') {
+                    progressText.textContent = 'Backup completed successfully!';
+                    progressPercent.textContent = '100%';
+                    currentTable.textContent = `All ${data.total_tables} tables backed up`;
+                    progressBar.style.width = '100%';
+                }
+            }
+
+
+        });
+    </script>
+
+    <script>
+        // Convert server timestamps to client local timezone
+        document.addEventListener('DOMContentLoaded', function() {
+            // Find all timestamp cells
+            const timestampCells = document.querySelectorAll('td[data-timestamp]');
+
+            timestampCells.forEach(cell => {
+                const serverTimestamp = parseInt(cell.getAttribute('data-timestamp'));
+                if (serverTimestamp) {
+                    // Convert server timestamp to client local time
+                    const date = new Date(serverTimestamp * 1000); // Convert to milliseconds
+
+                    // Format as YYYY-MM-DD HH:MM:SS in local timezone
+                    const year = date.getFullYear();
+                    const month = String(date.getMonth() + 1).padStart(2, '0');
+                    const day = String(date.getDate()).padStart(2, '0');
+                    const hours = String(date.getHours()).padStart(2, '0');
+                    const minutes = String(date.getMinutes()).padStart(2, '0');
+                    const seconds = String(date.getSeconds()).padStart(2, '0');
+
+                    const localTimeString = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+                    cell.textContent = localTimeString;
+                }
+            });
         });
     </script>
 </body>
