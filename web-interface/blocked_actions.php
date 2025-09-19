@@ -10,7 +10,7 @@ function respond($status, $message, $extra = []) {
 $action = $_POST['action'] ?? '';
 if ($action === '') respond('error', 'action required');
 
-// Utility: find all IPs for a hostname (last 30 days traffic)
+// Utility: find all IPs for a hostname (last 1 days traffic)
 function find_associated_ips($hostname) {
     global $mysqli;
     $stmt = $mysqli->prepare('
@@ -19,7 +19,7 @@ function find_associated_ips($hostname) {
         JOIN domain_ip_addresses dip ON dip.ip_address_id = ip.id
         JOIN domains d ON d.id = dip.domain_id
         JOIN packet_logs pl ON pl.domain_id = d.id
-        WHERE d.domain = ? AND pl.packet_timestamp >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+        WHERE d.domain = ? AND pl.packet_timestamp >= DATE_SUB(NOW(), INTERVAL 1 DAY)
     ');
     $stmt->bind_param('s', $hostname);
     $stmt->execute();

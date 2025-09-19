@@ -63,14 +63,14 @@ try {
 
         $blocklistDomainId = $domainRow['id'];
 
-        // Find all IPs associated with this hostname in the last 30 days
+        // Find all IPs associated with this hostname in the last 1 days
         $stmt = $mysqli->prepare('
             SELECT DISTINCT ip.ip_address, ip.id as ip_id
             FROM ip_addresses ip
             JOIN domain_ip_addresses dip ON dip.ip_address_id = ip.id
             JOIN domains d ON d.id = dip.domain_id
             JOIN packet_logs pl ON pl.domain_id = d.id
-            WHERE d.domain = ? AND pl.packet_timestamp >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+            WHERE d.domain = ? AND pl.packet_timestamp >= DATE_SUB(NOW(), INTERVAL 1 DAY)
         ');
         $stmt->bind_param('s', $domain);
         $stmt->execute();

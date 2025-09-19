@@ -15,7 +15,7 @@ try {
     if ($last_id) {
         $where_conditions[] = "be.id < " . intval($last_id);
     }
-    if ($latest_id) {
+    if ($latest_id !== null) {
         $where_conditions[] = "be.id > " . intval($latest_id);
     }
     $where_clause = !empty($where_conditions) ? "WHERE " . implode(" AND ", $where_conditions) : "";
@@ -54,7 +54,7 @@ try {
             WHEN be.direction = 'OUT' THEN be.dst_ip_id
             ELSE be.src_ip_id
         END
-    ) AND dia.last_seen >= DATE_SUB(NOW(), INTERVAL 97 DAY)
+    ) AND dia.last_seen >= DATE_SUB(NOW(), INTERVAL 1 DAY)
     LEFT JOIN domains d ON dia.domain_id = d.id
     {$where_clause}
     GROUP BY be.id, be.event_time, be.direction, be.proto, be.src_ip_id, be.dst_ip_id,
