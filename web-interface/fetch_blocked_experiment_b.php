@@ -15,9 +15,15 @@ try {
     if ($last_id) {
         $where_conditions[] = "be.id < " . intval($last_id);
     }
-    if ($latest_id) {
+    if ($latest_id !== null) {
         $where_conditions[] = "be.id > " . intval($latest_id);
     }
+    
+    // Safeguard: if both conditions exist and would create impossible query, prioritize latest_id (newer data)
+    if ($last_id && $latest_id !== null && intval($last_id) <= intval($latest_id)) {
+        $where_conditions = ["be.id > " . intval($latest_id)]; // Only use latest_id
+    }
+    
     $where_clause = !empty($where_conditions) ? "WHERE " . implode(" AND ", $where_conditions) : "";
 
     $sql = "SELECT
@@ -44,24 +50,23 @@ try {
             WHEN be.direction = 'OUT' THEN dst_ip.ip_address
             ELSE src_ip.ip_address
         END AS primary_ip,
-        GROUP_CONCAT(DISTINCT bd.domain ORDER BY bd.domain SEPARATOR '|') AS all_hostnames
+        GROUP_CONCAT(DISTINCT d.domain ORDER BY d.domain SEPARATOR '|') AS all_hostnames
     FROM blocked_events be
     LEFT JOIN ip_addresses src_ip ON be.src_ip_id = src_ip.id
     LEFT JOIN ip_addresses dst_ip ON be.dst_ip_id = dst_ip.id
-    LEFT JOIN blocked_ips bi ON bi.ip_id = (
+    LEFT JOIN domain_ip_addresses dia ON dia.ip_address_id = (
         CASE
             WHEN be.direction = 'IN' THEN be.src_ip_id
             WHEN be.direction = 'OUT' THEN be.dst_ip_id
             ELSE be.src_ip_id
         END
-    ) AND bi.last_seen >= DATE_SUB(NOW(), INTERVAL 97 DAY)
-    LEFT JOIN blocklist_domains bd ON bi.blocklist_domain_id = bd.id
+    ) AND dia.last_seen >= DATE_SUB(NOW(), INTERVAL 1 DAY)
+    LEFT JOIN domains d ON dia.domain_id = d.id
     {$where_clause}
     GROUP BY be.id, be.event_time, be.direction, be.proto, be.src_ip_id, be.dst_ip_id,
              be.src_port, be.dst_port, be.iface_in, be.iface_out, be.message
     ORDER BY be.id DESC
     LIMIT {$limit}";
-
 
     $result = $mysqli->query($sql);
 
@@ -97,7 +102,6 @@ try {
 
     // Output the JSON
     echo json_encode($rows, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-
 } catch (Exception $e) {
     http_response_code(500);
     echo json_encode([

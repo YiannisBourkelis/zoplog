@@ -172,11 +172,11 @@ $uniqueIPs = $uniqueRes->fetch_assoc()["cnt"];
 
 // Top hosts (last 5)
 $topHostsRes = $mysqli->query("
-    SELECT h.hostname, COUNT(*) AS cnt 
+    SELECT d.domain, COUNT(*) AS cnt 
     FROM packet_logs p
-    LEFT JOIN hostnames h ON p.hostname_id = h.id
-    WHERE h.hostname IS NOT NULL
-    GROUP BY h.hostname
+    LEFT JOIN domains d ON p.domain_id = d.id
+    WHERE d.domain IS NOT NULL
+    GROUP BY d.domain
     ORDER BY cnt DESC
     LIMIT 5
 ");

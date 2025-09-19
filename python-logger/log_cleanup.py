@@ -91,7 +91,7 @@ def db_connect():
 def get_table_sizes(cursor) -> dict:
     """Get the size of main log tables in MB."""
     sizes = {}
-    tables = ['packet_logs', 'blocked_events', 'ip_addresses', 'hostnames', 'paths', 'user_agents']
+    tables = ['packet_logs', 'blocked_events', 'ip_addresses', 'domains', 'domain_ip_addresses', 'paths', 'user_agents']
 
     for table in tables:
         cursor.execute(f"""
@@ -211,7 +211,7 @@ def cleanup_orphaned_records(cursor, dry_run: bool = False) -> dict:
 
 def optimize_tables(cursor, dry_run: bool = False) -> dict:
     """Optimize tables after cleanup."""
-    tables = ['packet_logs', 'blocked_events', 'ip_addresses', 'hostnames', 'paths', 'user_agents']
+    tables = ['packet_logs', 'blocked_events', 'ip_addresses', 'domains', 'domain_ip_addresses', 'paths', 'user_agents']
     stats = {}
 
     for table in tables:

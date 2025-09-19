@@ -9,7 +9,7 @@ $offset = intval($_GET["offset"] ?? 0);
 $limit = intval($_GET["limit"] ?? 200);
 $ip = $_GET["ip"] ?? "";
 $mac = $_GET["mac"] ?? "";
-$hostname = $_GET["hostname"] ?? "";
+$domain = $_GET["domain"] ?? "";
 $method = $_GET["method"] ?? "";
 $type = $_GET["type"] ?? "";
 $since = $_GET["since"] ?? "";
@@ -35,10 +35,10 @@ if ($mac) {
     $types .= "ss";
 }
 
-// Hostname filter
-if ($hostname) {
-    $where[] = "h.hostname LIKE ?";
-    $params[] = "%$hostname%";
+// Domain filter
+if ($domain) {
+    $where[] = "d.domain LIKE ?";
+    $params[] = "%$domain%";
     $types .= "s";
 }
 
@@ -82,13 +82,13 @@ $sql = "
 SELECT p.packet_timestamp, p.src_port, p.dst_port, p.method, p.type,
        src_ip.ip_address AS src_ip, dst_ip.ip_address AS dst_ip,
        src_mac.mac_address AS src_mac, dst_mac.mac_address AS dst_mac,
-       h.hostname, path.path
+       d.domain, path.path
 FROM packet_logs p
 LEFT JOIN ip_addresses src_ip ON p.src_ip_id = src_ip.id
 LEFT JOIN ip_addresses dst_ip ON p.dst_ip_id = dst_ip.id
 LEFT JOIN mac_addresses src_mac ON p.src_mac_id = src_mac.id
 LEFT JOIN mac_addresses dst_mac ON p.dst_mac_id = dst_mac.id
-LEFT JOIN hostnames h ON p.hostname_id = h.id
+LEFT JOIN domains d ON p.domain_id = d.id
 LEFT JOIN paths path ON p.path_id = path.id
 $where_sql
 ORDER BY p.packet_timestamp $order

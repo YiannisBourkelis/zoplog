@@ -210,30 +210,45 @@ def get_or_insert(table, column, value, cursor=None):
         # Let caller handle errors; return None for safety
         return None
 
-def get_or_insert_hostname_with_ip(hostname, ip_id):
-    """Insert hostname with IP relationship or get existing one, updating IP if needed"""
-    if not hostname:
+def get_or_insert_domain_with_ip(domain, ip_id):
+    """Insert domain with IP relationship or get existing one, updating relationship if needed"""
+    if not domain:
         return None
-    
+
     conn, cursor = get_db_connection()
-    # First check if hostname exists
-    cursor.execute("SELECT id, ip_id FROM hostnames WHERE hostname = %s", (hostname,))
+    # First check if domain exists
+    cursor.execute("SELECT id FROM domains WHERE domain = %s", (domain,))
     result = cursor.fetchone()
-    
+
     if result:
-        existing_id, existing_ip_id = result
-        # If IP relationship doesn't exist but we have one, update it
-        if not existing_ip_id and ip_id:
-            cursor.execute("UPDATE hostnames SET ip_id = %s WHERE id = %s", (ip_id, existing_id))
-            conn.commit()
-        return existing_id
+        domain_id = result[0]
+        # Check if IP relationship exists in pivot table
+        cursor.execute("SELECT id FROM domain_ip_addresses WHERE domain_id = %s AND ip_address_id = %s", (domain_id, ip_id))
+        if not cursor.fetchone() and ip_id:
+            # Create relationship if it doesn't exist
+            cursor.execute(
+                "INSERT INTO domain_ip_addresses (domain_id, ip_address_id) VALUES (%s, %s)",
+                (domain_id, ip_id)
+            )
+        conn.commit()
+        return domain_id
     else:
-        # Insert new hostname with IP relationship
+        # Insert new domain
         cursor.execute(
-            "INSERT INTO hostnames (hostname, ip_id) VALUES (%s, %s)",
-            (hostname, ip_id)
+            "INSERT INTO domains (domain) VALUES (%s)",
+            (domain,)
         )
-        return cursor.lastrowid
+        domain_id = cursor.lastrowid
+
+        # Create IP relationship if IP provided
+        if ip_id:
+            cursor.execute(
+                "INSERT INTO domain_ip_addresses (domain_id, ip_address_id) VALUES (%s, %s)",
+                (domain_id, ip_id)
+            )
+
+        conn.commit()
+        return domain_id
 
 def get_or_insert_ip(ip_address, cursor=None):
     return get_or_insert("ip_addresses", "ip_address", ip_address, cursor=cursor)
@@ -257,7 +272,7 @@ def insert_packet_log(packet_timestamp, src_ip, src_port, dst_ip, dst_port,
         dst_ip_id = get_or_insert_ip(dst_ip, cursor=cursor) if dst_ip else None
         src_mac_id = get_or_insert_mac(src_mac, cursor=cursor) if src_mac else None
         dst_mac_id = get_or_insert_mac(dst_mac, cursor=cursor) if dst_mac else None
-        hostname_id = get_or_insert_hostname_with_ip(hostname, dst_ip_id) if hostname else None
+        domain_id = get_or_insert_domain_with_ip(hostname, dst_ip_id) if hostname else None
         path_id = get_or_insert("paths", "path", path, cursor=cursor) if path else None
         user_agent_id = get_or_insert("user_agents", "user_agent", user_agent, cursor=cursor) if user_agent else None
         accept_language_id = get_or_insert("accept_languages", "accept_language", accept_language, cursor=cursor) if accept_language else None
@@ -266,11 +281,20 @@ def insert_packet_log(packet_timestamp, src_ip, src_port, dst_ip, dst_port,
             INSERT INTO packet_logs
             (packet_timestamp, src_ip_id, src_port, dst_ip_id, dst_port,
              src_mac_id, dst_mac_id,
-             method, hostname_id, path_id, user_agent_id, accept_language_id, type)
+             method, domain_id, path_id, user_agent_id, accept_language_id, type)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """, (packet_timestamp, src_ip_id, src_port, dst_ip_id, dst_port,
               src_mac_id, dst_mac_id,
-              method, hostname_id, path_id, user_agent_id, accept_language_id, pkt_type))
+              method, domain_id, path_id, user_agent_id, accept_language_id, pkt_type))
+
+        # Increment allowed_count in domain_ip_addresses table if we have both domain_id and dst_ip_id
+        if domain_id and dst_ip_id:
+            cursor.execute("""
+                UPDATE domain_ip_addresses
+                SET allowed_count = allowed_count + 1, last_seen = NOW()
+                WHERE domain_id = %s AND ip_address_id = %s
+            """, (domain_id, dst_ip_id))
+
         conn.commit()
 
     except mariadb.Error as e:
@@ -279,17 +303,30 @@ def insert_packet_log(packet_timestamp, src_ip, src_port, dst_ip, dst_port,
             try:
                 conn = mariadb.connect(**DB_CONFIG)
                 cursor = conn.cursor()
-                insert_packet_log(packet_timestamp, src_ip, src_port, dst_ip, dst_port,
-                                  src_mac, dst_mac, method, hostname, path, user_agent,
-                                  accept_language, pkt_type)
-            except Exception as e2:
-                print(f"Failed to insert packet log after reconnect: {e2}")
-        else:
-            print(f"Database error inserting packet log: {e}")
-    except Exception as e:
-        print(f"Unexpected error inserting packet log: {e}")
+                # Retry the insert with fresh connection
+                cursor.execute("""
+                    INSERT INTO packet_logs
+                    (packet_timestamp, src_ip_id, src_port, dst_ip_id, dst_port,
+                     src_mac_id, dst_mac_id,
+                     method, domain_id, path_id, user_agent_id, accept_language_id, type)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """, (packet_timestamp, src_ip_id, src_port, dst_ip_id, dst_port,
+                      src_mac_id, dst_mac_id,
+                      method, domain_id, path_id, user_agent_id, accept_language_id, pkt_type))
 
-# --- Blocklist matching & firewall helper ---
+                # Increment allowed_count in domain_ip_addresses table if we have both domain_id and dst_ip_id
+                if domain_id and dst_ip_id:
+                    cursor.execute("""
+                        UPDATE domain_ip_addresses
+                        SET allowed_count = allowed_count + 1, last_seen = NOW()
+                        WHERE domain_id = %s AND ip_address_id = %s
+                    """, (domain_id, dst_ip_id))
+
+                conn.commit()
+            except Exception as e2:
+                print(f"Packet log insert failed after reconnect: {e2}")
+        else:
+            print(f"Packet log insert error: {e}")
 def _normalize_hostname(host: str) -> str:
     if not host:
         return ""
@@ -396,33 +433,8 @@ def is_host_whitelisted(host: str, settings: dict):
 
 def _record_blocked_ip(blocklist_domain_id: int, ip: str):
     """Insert or update the blocked IP record linked to a specific blocklist_domain row."""
-    global conn, cursor
-    if not ip or not blocklist_domain_id:
-        return
-    try:
-        conn, cursor = get_db_connection()
-        ip_id = get_or_insert_ip(ip, cursor=cursor)
-        if not ip_id:
-            return
-        # Upsert to track first/last_seen and hit_count
-        cursor.execute(
-            """
-            INSERT INTO blocked_ips (blocklist_domain_id, ip_id, first_seen, last_seen, hit_count)
-            VALUES (%s, %s, NOW(), NOW(), 1)
-            ON DUPLICATE KEY UPDATE last_seen = VALUES(last_seen), hit_count = hit_count + 1
-            """,
-            (blocklist_domain_id, ip_id),
-        )
-        conn.commit()
-    except mariadb.Error as e:
-        if "MySQL server has gone away" in str(e):
-            try:
-                conn, cursor = get_db_connection()
-                _record_blocked_ip(blocklist_domain_id, ip)
-            except Exception as e2:
-                print(f"blocked_ips insert failed after reconnect: {e2}")
-        else:
-            print(f"blocked_ips insert error: {e}")
+    # This function is no longer needed since blocked_ips table was removed
+    pass
 
 
 def ipset_add_ip(blocklist_id: int, ip: str, blocklist_domain_id: int | None = None, settings: dict = None):
@@ -482,12 +494,7 @@ def ipset_add_ip(blocklist_id: int, ip: str, blocklist_domain_id: int | None = N
 
     # Independently record in DB (even if firewall fails, for observability)
     if blocklist_domain_id:
-        try:
-            debug_print(f"DEBUG: Recording blocked IP in database for domain_id={blocklist_domain_id}", settings=settings)
-            _record_blocked_ip(blocklist_domain_id, ip)
-            debug_print(f"DEBUG: Successfully recorded blocked IP in database", settings=settings)
-        except Exception as e:
-            print(f"ERROR: record blocked_ip error domain_id={blocklist_domain_id} ip={ip} err={e}")
+        debug_print(f"DEBUG: Database recording skipped (blocked_ips table removed) for domain_id={blocklist_domain_id}", settings=settings)
     else:
         debug_print(f"DEBUG: No blocklist_domain_id provided, skipping database record", settings=settings)
 

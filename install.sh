@@ -527,6 +527,7 @@ log_level = INFO
 apply_to_interface = $FIREWALL_INTERFACE
 block_mode = immediate
 log_blocked = true
+firewall_rule_timeout = 10800
 
 [system]
 bridge_mode = $BRIDGE_MODE

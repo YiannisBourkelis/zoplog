@@ -54,7 +54,7 @@ try {
             WHEN be.direction = 'OUT' THEN be.dst_ip_id
             ELSE be.src_ip_id
         END
-    ) AND bi.last_seen >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+    ) AND bi.last_seen >= DATE_SUB(NOW(), INTERVAL 1 DAY)
     LEFT JOIN blocklist_domains bd ON bi.blocklist_domain_id = bd.id
     {$where_clause}
     GROUP BY be.id, be.event_time, be.direction, be.proto, be.src_ip_id, be.dst_ip_id,

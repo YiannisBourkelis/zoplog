@@ -4,13 +4,13 @@ require_once __DIR__ . '/../zoplog_config.php';
 
 // Top hosts data
 $topHostsRes = $mysqli->query("
-    SELECT h.hostname, COUNT(*) AS cnt
+    SELECT d.domain, COUNT(*) AS cnt
     FROM packet_logs p
-    LEFT JOIN hostnames h ON p.hostname_id = h.id
-    WHERE h.hostname IS NOT NULL
-    GROUP BY h.hostname
+    LEFT JOIN domains d ON p.domain_id = d.id
+    WHERE d.domain IS NOT NULL
+    GROUP BY d.domain
     ORDER BY cnt DESC
-    LIMIT 5
+    LIMIT 200
 ");
 
 $topHosts = [];

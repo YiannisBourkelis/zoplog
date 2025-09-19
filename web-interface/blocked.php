@@ -765,17 +765,13 @@ async function fetchBlocked(reset=false, prepend=false) {
   });
 
   // For cursor-based pagination: when not resetting and we have a lastId, request older rows
-  if (!reset && lastId) {
+  // But don't send last_id when doing prepend (auto-refresh) to avoid conflicting conditions
+  if (!reset && !prepend && lastId) {
     params.append('last_id', lastId);
   }
 
-  if (prepend) {
-    if (latestId !== null) {
-      params.append("latest_id", latestId);
-    } else {
-      // If latestId is null, get events with ID > 0 (all events)
-      params.append("latest_id", 0);
-    }
+  if (prepend && latestId !== null) {
+    params.append("latest_id", latestId);
   }
 
   try {
@@ -1072,13 +1068,11 @@ window.addEventListener("scroll", () => {
 // Auto refresh
 const refreshSelect = document.getElementById("refresh-interval");
 const savedInterval = localStorage.getItem("blocked-refresh-interval");
-if (savedInterval !== null) {
+if (savedInterval !== null && savedInterval !== "0") {
   refreshSelect.value = savedInterval;
 }
-const initialInterval = savedInterval ? parseInt(savedInterval) : parseInt(refreshSelect.value);
-if (initialInterval > 0) {
-  autoRefreshTimer = setInterval(() => fetchBlocked(false, true), initialInterval);
-}
+const initialInterval = (savedInterval && savedInterval !== "0") ? parseInt(savedInterval) : parseInt(refreshSelect.value);
+// Note: Auto-refresh timer will be started after initial load completes
 
 // Update last refresh time indicator
 function updateLastRefreshIndicator(isError = false) {
@@ -1105,8 +1099,29 @@ function updateLastRefreshIndicator(isError = false) {
   }
 }
 
-// Listen for refresh interval changes to update indicator
+// Listen for refresh interval changes
 refreshSelect.addEventListener("change", () => {
+  const newInterval = parseInt(refreshSelect.value);
+  
+  // Clear existing timer
+  if (autoRefreshTimer) {
+    clearInterval(autoRefreshTimer);
+    autoRefreshTimer = null;
+  }
+  
+  // Save to localStorage (don't save "0" so it defaults to HTML selected value)
+  if (newInterval > 0) {
+    localStorage.setItem("blocked-refresh-interval", newInterval);
+  } else {
+    localStorage.removeItem("blocked-refresh-interval");
+  }
+  
+  // Set up new timer if interval > 0
+  if (newInterval > 0) {
+    autoRefreshTimer = setInterval(() => fetchBlocked(false, true), newInterval);
+  }
+  
+  // Update indicator
   updateLastRefreshIndicator();
 });
 
@@ -1149,10 +1164,15 @@ document.getElementById("new-logs-banner").addEventListener("click", () => {
 });
 
 // Initial load
-fetchBlocked(true);
-
-// Initialize last refresh indicator
-updateLastRefreshIndicator();
+fetchBlocked(true).then(() => {
+  // Start auto-refresh after initial load completes
+  if (initialInterval > 0) {
+    autoRefreshTimer = setInterval(() => fetchBlocked(false, true), initialInterval);
+  }
+  
+  // Initialize last refresh indicator
+  updateLastRefreshIndicator();
+});
 
 // Delegate button actions
 document.addEventListener('click', async (e) => {

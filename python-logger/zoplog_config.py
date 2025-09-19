@@ -92,6 +92,7 @@ def load_settings_config() -> Dict[str, Any]:
         "log_level": "INFO",
         "block_mode": "immediate",
         "log_blocked": True,
+        "firewall_rule_timeout": 10800,  # 3 hours default
         "update_interval": 30,
         "max_log_entries": 10000
     }
@@ -117,6 +118,7 @@ def load_settings_config() -> Dict[str, Any]:
                         config['firewall_interface'] = firewall.get('apply_to_interface', config['firewall_interface'])
                         config['block_mode'] = firewall.get('block_mode', config['block_mode'])
                         config['log_blocked'] = firewall.getboolean('log_blocked', config['log_blocked'])
+                        config['firewall_rule_timeout'] = max(1, firewall.getint('firewall_rule_timeout', config['firewall_rule_timeout']))
                     
                     if parser.has_section('system'):
                         system = parser['system']

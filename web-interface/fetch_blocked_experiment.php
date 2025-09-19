@@ -48,7 +48,7 @@ try {
         LEFT JOIN ip_addresses dst_ip ON be.dst_ip_id = dst_ip.id
         " . ($last_id ? "WHERE be.id < " . intval($last_id) : "") . "
     ) pid
-    LEFT JOIN blocked_ips bi ON bi.ip_id = pid.primary_ip_id AND bi.last_seen >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+    LEFT JOIN blocked_ips bi ON bi.ip_id = pid.primary_ip_id AND bi.last_seen >= DATE_SUB(NOW(), INTERVAL 1 DAY)
     LEFT JOIN blocklist_domains bd ON bi.blocklist_domain_id = bd.id
     GROUP BY pid.primary_ip_id, pid.primary_ip
     ORDER BY latest_event_id DESC

@@ -31,10 +31,22 @@ TABLE="zoplog"
 SET_V4="zoplog-blocklist-${id}-v4"
 SET_V6="zoplog-blocklist-${id}-v6"
 
+# Load firewall rule timeout from centralized config
+FIREWALL_TIMEOUT=""
+if [[ -f "/etc/zoplog/zoplog.conf" ]]; then
+  FIREWALL_TIMEOUT=$(grep "^firewall_rule_timeout" /etc/zoplog/zoplog.conf 2>/dev/null | cut -d'=' -f2 | xargs || echo "")
+fi
+
+# Ensure timeout is at least 1 second (default to 10800 seconds = 3 hours if not configured or invalid)
+if [[ -z "$FIREWALL_TIMEOUT" || "$FIREWALL_TIMEOUT" -lt 1 ]]; then
+  FIREWALL_TIMEOUT="10800"
+fi
+FIREWALL_TIMEOUT="timeout ${FIREWALL_TIMEOUT}s;"
+
 # Ensure table and sets exist (no-op if present)
 "$NFT_BIN" list table inet "$TABLE" >/dev/null 2>&1 || "$NFT_BIN" add table inet "$TABLE"
-"$NFT_BIN" list set inet "$TABLE" "$SET_V4" >/dev/null 2>&1 || "$NFT_BIN" add set inet "$TABLE" "$SET_V4" '{ type ipv4_addr; flags interval; }'
-"$NFT_BIN" list set inet "$TABLE" "$SET_V6" >/dev/null 2>&1 || "$NFT_BIN" add set inet "$TABLE" "$SET_V6" '{ type ipv6_addr; flags interval; }'
+"$NFT_BIN" list set inet "$TABLE" "$SET_V4" >/dev/null 2>&1 || "$NFT_BIN" add set inet "$TABLE" "$SET_V4" "{ type ipv4_addr; flags interval; $FIREWALL_TIMEOUT }"
+"$NFT_BIN" list set inet "$TABLE" "$SET_V6" >/dev/null 2>&1 || "$NFT_BIN" add set inet "$TABLE" "$SET_V6" "{ type ipv6_addr; flags interval; $FIREWALL_TIMEOUT }"
 
 # Add element to the appropriate set; ignore duplicates
 if [[ "$ip" == *:* ]]; then
