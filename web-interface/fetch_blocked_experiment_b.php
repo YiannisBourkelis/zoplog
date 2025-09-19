@@ -18,6 +18,12 @@ try {
     if ($latest_id !== null) {
         $where_conditions[] = "be.id > " . intval($latest_id);
     }
+    
+    // Safeguard: if both conditions exist and would create impossible query, prioritize latest_id (newer data)
+    if ($last_id && $latest_id !== null && intval($last_id) <= intval($latest_id)) {
+        $where_conditions = ["be.id > " . intval($latest_id)]; // Only use latest_id
+    }
+    
     $where_clause = !empty($where_conditions) ? "WHERE " . implode(" AND ", $where_conditions) : "";
 
     $sql = "SELECT
@@ -62,6 +68,16 @@ try {
     ORDER BY be.id DESC
     LIMIT {$limit}";
 
+    // Debug logging
+    $log_file = '/tmp/fetch_blocked_debug.log';
+    $log_entry = date('Y-m-d H:i:s') . " - Parameters: limit=$limit, last_id=" . ($last_id ?? 'null') . ", latest_id=" . ($latest_id ?? 'null') . "\n";
+    $log_entry .= "WHERE clause: $where_clause\n";
+    if ($last_id && $latest_id !== null && intval($last_id) <= intval($latest_id)) {
+        $log_entry .= "SAFEGUARD: Conflicting conditions detected, using only latest_id\n";
+    }
+    $log_entry .= "SQL Query: $sql\n";
+    $log_entry .= "------------------------\n";
+    file_put_contents($log_file, $log_entry, FILE_APPEND);
 
     $result = $mysqli->query($sql);
 
@@ -95,9 +111,16 @@ try {
     $result->free();
     $mysqli->close();
 
+    // Debug logging
+    $log_entry .= "Results: " . count($rows) . " records returned\n";
+    if (count($rows) > 0) {
+        $log_entry .= "First ID: " . $rows[0]['id'] . ", Last ID: " . $rows[count($rows) - 1]['id'] . "\n";
+    }
+    $log_entry .= "========================\n";
+    file_put_contents($log_file, $log_entry, FILE_APPEND);
+
     // Output the JSON
     echo json_encode($rows, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-
 } catch (Exception $e) {
     http_response_code(500);
     echo json_encode([

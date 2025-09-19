@@ -765,13 +765,18 @@ async function fetchBlocked(reset=false, prepend=false) {
   });
 
   // For cursor-based pagination: when not resetting and we have a lastId, request older rows
-  if (!reset && lastId) {
+  // But don't send last_id when doing prepend (auto-refresh) to avoid conflicting conditions
+  if (!reset && !prepend && lastId) {
     params.append('last_id', lastId);
   }
 
   if (prepend && latestId !== null) {
     params.append("latest_id", latestId);
   }
+
+  // Debug logging
+  console.log(`[DEBUG] fetchBlocked: reset=${reset}, prepend=${prepend}, lastId=${lastId}, latestId=${latestId}`);
+  console.log(`[DEBUG] Request URL: fetch_blocked_experiment_b.php?${params.toString()}`);
 
   try {
     const res = await fetch("fetch_blocked_experiment_b.php?" + params.toString());
@@ -782,12 +787,20 @@ async function fetchBlocked(reset=false, prepend=false) {
     
     const data = await res.json();
 
+    // Debug logging
+    console.log(`[DEBUG] Response received: ${data.length} records`);
+    if (data.length > 0) {
+      console.log(`[DEBUG] First record ID: ${data[0].id}, Last record ID: ${data[data.length - 1].id}`);
+    }
+
     if (prepend) {
       if (data.length > 0) {
         // Update latestId to the maximum ID from new data for future auto-refresh
         const newIds = data.map(r => parseInt(r.id, 10)).filter(id => !isNaN(id));
         if (newIds.length > 0) {
+          const oldLatestId = latestId;
           latestId = Math.max(latestId || 0, ...newIds);
+          console.log(`[DEBUG] Updated latestId from ${oldLatestId} to ${latestId} (prepend mode)`);
         }
         const fragment = document.createDocumentFragment();
         
@@ -962,7 +975,9 @@ async function fetchBlocked(reset=false, prepend=false) {
           lastId = minId;
           // Also update latestId to the maximum ID for auto-refresh
           const maxId = Math.max(...ids);
+          const oldLatestId = latestId;
           latestId = Math.max(latestId || 0, maxId);
+          console.log(`[DEBUG] Updated latestId from ${oldLatestId} to ${latestId} (regular load)`);
         }
       }
     }
@@ -1166,7 +1181,11 @@ document.getElementById("new-logs-banner").addEventListener("click", () => {
 fetchBlocked(true).then(() => {
   // Start auto-refresh after initial load completes
   if (initialInterval > 0) {
-    autoRefreshTimer = setInterval(() => fetchBlocked(false, true), initialInterval);
+    console.log(`[DEBUG] Setting up auto-refresh timer with interval ${initialInterval}ms`);
+    autoRefreshTimer = setInterval(() => {
+      console.log(`[DEBUG] Auto-refresh timer fired`);
+      fetchBlocked(false, true);
+    }, initialInterval);
   }
   
   // Initialize last refresh indicator
