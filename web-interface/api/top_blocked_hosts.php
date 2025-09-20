@@ -2,60 +2,78 @@
 header("Content-Type: application/json");
 require_once __DIR__ . '/../zoplog_config.php';
 
-// Top 30 blocked domains (30 days) - based on blocked_events and domain_ip_addresses
-$topBlocked30 = $mysqli->query("
-SELECT
-    d.domain as blocked_domain,
-    COUNT(DISTINCT CONCAT(
-        COALESCE(be.src_ip_id, ''),
-        '-',
-        COALESCE(be.dst_port, ''),
-        '-',
-        FLOOR(UNIX_TIMESTAMP(be.event_time) / 30)
-    )) as block_count
-FROM blocked_events be
-INNER JOIN domain_ip_addresses dip ON dip.ip_address_id = be.wan_ip_id
-INNER JOIN domains d ON d.id = dip.domain_id
-WHERE be.event_time >= NOW() - INTERVAL 30 DAY
-GROUP BY d.domain
-ORDER BY block_count DESC
-LIMIT 30;
-");
+// Simplified parallel execution using single connection with optimized queries
+$query30 = "
+    SELECT
+        d.domain as blocked_domain,
+        COUNT(*) as block_count
+    FROM blocked_events be
+    INNER JOIN domain_ip_addresses dip ON dip.ip_address_id = be.wan_ip_id
+    INNER JOIN domains d ON d.id = dip.domain_id
+    WHERE be.event_time >= NOW() - INTERVAL 30 DAY
+    GROUP BY d.id
+    ORDER BY block_count DESC
+    LIMIT 30
+";
 
-$blockedDomains30 = [];
-while ($row = $topBlocked30->fetch_assoc()) {
-    $blockedDomains30[] = [
-        'blocked_host' => $row['blocked_domain'],
-        'cnt' => (int)$row['block_count']
-    ];
+$query365 = "
+    SELECT
+        d.domain as blocked_domain,
+        COUNT(*) as block_count
+    FROM blocked_events be
+    INNER JOIN domain_ip_addresses dip ON dip.ip_address_id = be.wan_ip_id
+    INNER JOIN domains d ON d.id = dip.domain_id
+    WHERE be.event_time >= NOW() - INTERVAL 365 DAY
+    GROUP BY d.id
+    ORDER BY block_count DESC
+    LIMIT 30
+";
+
+// Execute queries sequentially but with optimized settings
+$mysqli->query("SET SESSION sql_mode = 'STRICT_TRANS_TABLES,NO_ZERO_DATE,NO_ZERO_IN_DATE,ERROR_FOR_DIVISION_BY_ZERO'");
+$mysqli->query("SET SESSION optimizer_switch = 'index_merge=on,index_merge_union=on,index_merge_sort_union=on,index_merge_intersection=on'");
+
+$start_time = microtime(true);
+
+// Execute both queries
+$topBlocked30 = $mysqli->query($query30);
+$topBlocked365 = $mysqli->query($query365);
+
+$execution_time = microtime(true) - $start_time;
+error_log("Sequential queries executed in: " . number_format($execution_time, 4) . " seconds");
+
+// Debug: Check if results are valid
+if (!$topBlocked30) {
+    error_log("30-day result is null: " . $mysqli->error);
+}
+if (!$topBlocked365) {
+    error_log("365-day result is null: " . $mysqli->error);
 }
 
-// Top 30 blocked domains (365 days) - based on blocked_events and domain_ip_addresses
-$topBlocked365 = $mysqli->query("
-SELECT
-    d.domain as blocked_domain,
-    COUNT(DISTINCT CONCAT(
-        COALESCE(be.src_ip_id, ''),
-        '-',
-        COALESCE(be.dst_port, ''),
-        '-',
-        FLOOR(UNIX_TIMESTAMP(be.event_time) / 30)
-    )) as block_count
-FROM blocked_events be
-INNER JOIN domain_ip_addresses dip ON dip.ip_address_id = be.wan_ip_id
-INNER JOIN domains d ON d.id = dip.domain_id
-WHERE be.event_time >= NOW() - INTERVAL 365 DAY
-GROUP BY d.domain
-ORDER BY block_count DESC
-LIMIT 30;
-");
+// Process 30-day results
+$blockedDomains30 = [];
+if ($topBlocked30 && $topBlocked30->num_rows > 0) {
+    while ($row = $topBlocked30->fetch_assoc()) {
+        $blockedDomains30[] = [
+            'blocked_host' => $row['blocked_domain'],
+            'cnt' => (int)$row['block_count']
+        ];
+    }
+} else {
+    error_log("30-day query returned no results. Rows: " . ($topBlocked30 ? $topBlocked30->num_rows : 'null') . ", Error: " . $mysqli->error);
+}
 
+// Process 365-day results
 $blockedDomains365 = [];
-while ($row = $topBlocked365->fetch_assoc()) {
-    $blockedDomains365[] = [
-        'blocked_host' => $row['blocked_domain'],
-        'cnt' => (int)$row['block_count']
-    ];
+if ($topBlocked365 && $topBlocked365->num_rows > 0) {
+    while ($row = $topBlocked365->fetch_assoc()) {
+        $blockedDomains365[] = [
+            'blocked_host' => $row['blocked_domain'],
+            'cnt' => (int)$row['block_count']
+        ];
+    }
+} else {
+    error_log("365-day query returned no results. Rows: " . ($topBlocked365 ? $topBlocked365->num_rows : 'null') . ", Error: " . $mysqli->error);
 }
 
 echo json_encode([
