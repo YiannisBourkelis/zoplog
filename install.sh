@@ -1472,6 +1472,7 @@ upgrade() {
     
     # Run only the required upgrade functions
     download_zoplog
+    setup_web_interface
     setup_sudoers
     setup_scripts
     create_database_schema
