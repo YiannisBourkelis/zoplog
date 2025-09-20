@@ -66,12 +66,11 @@ def get_wan_ip_id(direction: str, src_ip_id: Optional[int], dst_ip_id: Optional[
     Determine the WAN IP ID based on direction, interface information, and monitoring interface.
     The monitoring interface is the WAN-facing interface.
     """
-    if direction == 'IN' and iface_in == monitoring_interface:
+    if iface_in == monitoring_interface:
         return src_ip_id
-    elif direction == 'OUT' and iface_out == monitoring_interface:
+    elif iface_out == monitoring_interface:
         return dst_ip_id
-    elif direction == 'FWD' and iface_out == monitoring_interface:
-        return dst_ip_id
+
     # Fallback to old logic if interface doesn't match
     if direction == 'IN':
         return src_ip_id
