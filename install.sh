@@ -1453,16 +1453,17 @@ upgrade() {
     if [ -f "/etc/zoplog/database.conf" ]; then
         log_info "Loading existing database configuration..."
         # Extract credentials from INI file, removing quotes and whitespace
-        DB_HOST=$(grep "^host" /etc/zoplog/database.conf | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
-        DB_USER=$(grep "^user" /etc/zoplog/database.conf | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
-        DB_PASS=$(grep "^password" /etc/zoplog/database.conf | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
-        DB_NAME=$(grep "^name" /etc/zoplog/database.conf | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
+        # Handle both formats: "key = value" and "key=value"
+        DB_HOST=$(grep "^host" /etc/zoplog/database.conf | sed 's/.*= *//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
+        DB_USER=$(grep "^user" /etc/zoplog/database.conf | sed 's/.*= *//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
+        DB_PASS=$(grep "^password" /etc/zoplog/database.conf | sed 's/.*= *//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
+        DB_NAME=$(grep "^name" /etc/zoplog/database.conf | sed 's/.*= *//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
         
         # Load system configuration
         if [ -f "/etc/zoplog/zoplog.conf" ]; then
-            INTERNET_IF=$(grep "^internet_interface" /etc/zoplog/zoplog.conf | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
-            INTERNAL_IF=$(grep "^internal_interface" /etc/zoplog/zoplog.conf | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
-            BRIDGE_MODE=$(grep "^bridge_mode" /etc/zoplog/zoplog.conf | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
+            INTERNET_IF=$(grep "^interface" /etc/zoplog/zoplog.conf | sed 's/.*= *//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
+            INTERNAL_IF=""  # Default to empty for single interface mode
+            BRIDGE_MODE="single"  # Default to single mode
         fi
     else
         log_error "No existing ZopLog configuration found. Please run full installation first."

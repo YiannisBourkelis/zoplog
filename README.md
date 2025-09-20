@@ -21,6 +21,30 @@ The installer will:
 
 **After installation:** Reboot your system, then access the dashboard at `http://your-server-ip/`
 
+## ⬆️ Upgrade Existing Installation
+
+If you already have ZopLog installed and want to update to the latest version:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/YiannisBourkelis/zoplog/main/install.sh | sudo bash -s -- --upgrade
+```
+
+Or download and run locally:
+
+```bash
+wget https://raw.githubusercontent.com/YiannisBourkelis/zoplog/main/install.sh
+sudo bash install.sh --upgrade
+```
+
+The upgrade process will:
+- ✅ Pull latest code from GitHub repository
+- ✅ Run any new database migrations
+- ✅ Update scripts and permissions
+- ✅ Restart services with new configuration
+- ✅ Preserve all existing data and settings
+
+**Note:** Upgrade mode requires an existing ZopLog installation and will skip dependency installation for faster execution.
+
 ## 🏗️ Architecture
 
 ZopLog works as a network bridge with two ethernet interfaces:
@@ -136,10 +160,13 @@ sudo systemctl stop zoplog-logger
 sudo journalctl -u zoplog-logger -f
 sudo journalctl -u zoplog-blockreader -f
 
+# Upgrade ZopLog to latest version
+sudo bash /opt/zoplog/zoplog/install.sh --upgrade
+
 # Firewall management
 sudo /opt/zoplog/zoplog/scripts/zoplog-firewall-apply <blocklist_id>
 sudo /opt/zoplog/zoplog/scripts/zoplog-firewall-toggle <blocklist_id> active
-sudo /opt/zoplog/zoplog/scripts/zoplog-firewall-remove <blocklist_id>
+sudo /opt/zoplog/zoplog-firewall-remove <blocklist_id>
 ```
 
 ### Adding Blocklists
