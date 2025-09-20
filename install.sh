@@ -7,6 +7,34 @@
 
 set -euo pipefail
 
+# Parse command line arguments
+UPGRADE_MODE=false
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --upgrade|-u)
+            UPGRADE_MODE=true
+            shift
+            ;;
+        --help|-h)
+            echo "Usage: $0 [OPTIONS]"
+            echo ""
+            echo "Options:"
+            echo "  --upgrade, -u    Upgrade mode: only update code and run migrations"
+            echo "  --help, -h       Show this help message"
+            echo ""
+            echo "Examples:"
+            echo "  $0               Full installation"
+            echo "  $0 --upgrade     Upgrade existing installation"
+            exit 0
+            ;;
+        *)
+            log_error "Unknown option: $1"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
+
 ZOPLOG_USER="zoplog"
 ZOPLOG_HOME="/opt/zoplog"
 ZOPLOG_REPO="https://github.com/YiannisBourkelis/zoplog.git"
@@ -1307,77 +1335,148 @@ create_database_schema() {
 }
 
 show_completion_message() {
+    local mode="${1:-install}"
     local_ip=$(ip route get 1 | sed -n 's/.*src \([0-9.]*\).*/\1/p')
     
-    log_success "ZopLog installation completed successfully!"
-    echo
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo -e "${GREEN}🎉 ZopLog is now installed and ready to use!${NC}"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo
-    echo -e "${BLUE}📋 Installation Summary:${NC}"
-    echo "  • System user created: $ZOPLOG_USER"
-    echo "  • Installation directory: $ZOPLOG_HOME/zoplog"
-    echo "  • Web interface: $WEB_ROOT"
-    echo "  • Database: $DB_NAME (user: $DB_USER)"
-    echo "  • Internet interface: $INTERNET_IF"
-    echo "  • Internal interface: $INTERNAL_IF"
-    echo
-    echo -e "${BLUE}🌐 Web Access:${NC}"
-    echo "  • Dashboard: http://$local_ip/"
-    echo "  • Logs: http://$local_ip/logger.php"
-    echo "  • Blocklists: http://$local_ip/blocklists.php"
-    echo
-    echo -e "${BLUE}🔧 Next Steps:${NC}"
-    echo "  1. After reboot, ZopLog services will start automatically!"
-    echo "     Services are already enabled for boot startup."
-    echo
-    echo "  2. Check service status after reboot:"
-    echo -e "     ${YELLOW}sudo systemctl status zoplog-logger${NC}"
-    echo -e "     ${YELLOW}sudo systemctl status zoplog-blockreader${NC}"
-    echo
-    echo "  3. If services need manual restart:"
-    echo -e "     ${YELLOW}sudo systemctl restart zoplog-logger zoplog-blockreader${NC}"
-    echo
-    echo -e "${BLUE}📚 Documentation:${NC}"
-    echo "  • GitHub: https://github.com/YiannisBourkelis/zoplog"
-    echo "  • Configuration files: $ZOPLOG_HOME/zoplog/"
-    echo
-    echo -e "${YELLOW}⚠️  Important Security Notes:${NC}"
-    echo "  • Database password saved in: $ZOPLOG_HOME/.db_credentials"
-    echo "  • Change default passwords after installation"
-    echo "  • Configure firewall rules according to your network setup"
-    echo
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    
-    # Interactive reboot prompt
-    echo
-    echo -e "${YELLOW}🔄 System Reboot Required${NC}"
-    echo "The network bridge configuration requires a system reboot to take effect."
-    echo
-    
-    # Only prompt for reboot if running interactively
-    if [ -t 0 ]; then
-        read -p "Would you like to reboot now? (y/N): " -n 1 -r
+    if [ "$mode" = "upgrade" ]; then
+        log_success "ZopLog upgrade completed successfully!"
         echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            log_info "Rebooting system in 5 seconds..."
-            sleep 5
-            sudo reboot
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo -e "${GREEN}⬆️  ZopLog has been upgraded!${NC}"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo
+        echo -e "${BLUE}📋 Upgrade Summary:${NC}"
+        echo "  • Code updated from GitHub"
+        echo "  • Database migrations applied"
+        echo "  • Services updated and restarted"
+        echo "  • Scripts and permissions refreshed"
+        echo
+        echo -e "${BLUE}🌐 Web Access:${NC}"
+        echo "  • Dashboard: http://$local_ip/"
+        echo "  • Logs: http://$local_ip/logger.php"
+        echo "  • Blocklists: http://$local_ip/blocklists.php"
+        echo
+        echo -e "${BLUE}🔧 Next Steps:${NC}"
+        echo "  1. Check service status:"
+        echo -e "     ${YELLOW}sudo systemctl status zoplog-logger${NC}"
+        echo -e "     ${YELLOW}sudo systemctl status zoplog-blockreader${NC}"
+        echo
+        echo "  2. If services need restart:"
+        echo -e "     ${YELLOW}sudo systemctl restart zoplog-logger zoplog-blockreader${NC}"
+        echo
+        echo -e "${GREEN}Upgrade complete! ZopLog is ready to use with the latest features.${NC}"
+    else
+        log_success "ZopLog installation completed successfully!"
+        echo
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo -e "${GREEN}🎉 ZopLog is now installed and ready to use!${NC}"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo
+        echo -e "${BLUE}📋 Installation Summary:${NC}"
+        echo "  • System user created: $ZOPLOG_USER"
+        echo "  • Installation directory: $ZOPLOG_HOME/zoplog"
+        echo "  • Web interface: $WEB_ROOT"
+        echo "  • Database: $DB_NAME (user: $DB_USER)"
+        echo "  • Internet interface: $INTERNET_IF"
+        echo "  • Internal interface: $INTERNAL_IF"
+        echo
+        echo -e "${BLUE}🌐 Web Access:${NC}"
+        echo "  • Dashboard: http://$local_ip/"
+        echo "  • Logs: http://$local_ip/logger.php"
+        echo "  • Blocklists: http://$local_ip/blocklists.php"
+        echo
+        echo -e "${BLUE}🔧 Next Steps:${NC}"
+        echo "  1. After reboot, ZopLog services will start automatically!"
+        echo "     Services are already enabled for boot startup."
+        echo
+        echo "  2. Check service status after reboot:"
+        echo -e "     ${YELLOW}sudo systemctl status zoplog-logger${NC}"
+        echo -e "     ${YELLOW}sudo systemctl status zoplog-blockreader${NC}"
+        echo
+        echo "  3. If services need manual restart:"
+        echo -e "     ${YELLOW}sudo systemctl restart zoplog-logger zoplog-blockreader${NC}"
+        echo
+        echo -e "${BLUE}📚 Documentation:${NC}"
+        echo "  • GitHub: https://github.com/YiannisBourkelis/zoplog"
+        echo "  • Configuration files: $ZOPLOG_HOME/zoplog/"
+        echo
+        echo -e "${YELLOW}⚠️  Important Security Notes:${NC}"
+        echo "  • Database password saved in: $ZOPLOG_HOME/.db_credentials"
+        echo "  • Change default passwords after installation"
+        echo "  • Configure firewall rules according to your network setup"
+        echo
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        
+        # Interactive reboot prompt
+        echo
+        echo -e "${YELLOW}🔄 System Reboot Required${NC}"
+        echo "The network bridge configuration requires a system reboot to take effect."
+        echo
+        
+        # Only prompt for reboot if running interactively
+        if [ -t 0 ]; then
+            read -p "Would you like to reboot now? (y/N): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                log_info "Rebooting system in 5 seconds..."
+                sleep 5
+                sudo reboot
+            else
+                echo
+                echo -e "${BLUE}Manual reboot required:${NC}"
+                echo -e "  ${YELLOW}sudo reboot${NC}"
+                echo
+                echo -e "${GREEN}Installation complete! Please reboot when ready.${NC}"
+            fi
         else
             echo
             echo -e "${BLUE}Manual reboot required:${NC}"
             echo -e "  ${YELLOW}sudo reboot${NC}"
             echo
-            echo -e "${GREEN}Installation complete! Please reboot when ready.${NC}"
+            echo -e "${GREEN}Installation complete! Please reboot to activate the network bridge.${NC}"
+            fi
+    fi
+}
+
+upgrade() {
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo -e "${GREEN}⬆️  ZopLog Upgrade Script${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo -e "${BLUE}Network Traffic Monitor & Blocker${NC}"
+    echo -e "${BLUE}Copyright 2025 Yiannis - Apache License 2.0${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo
+    
+    log_info "Starting ZopLog upgrade..."
+    
+    # Load existing configuration
+    if [ -f "/etc/zoplog/database.conf" ]; then
+        log_info "Loading existing database configuration..."
+        # Extract credentials from INI file, removing quotes and whitespace
+        DB_HOST=$(grep "^host" /etc/zoplog/database.conf | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
+        DB_USER=$(grep "^user" /etc/zoplog/database.conf | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
+        DB_PASS=$(grep "^password" /etc/zoplog/database.conf | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
+        DB_NAME=$(grep "^name" /etc/zoplog/database.conf | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
+        
+        # Load system configuration
+        if [ -f "/etc/zoplog/zoplog.conf" ]; then
+            INTERNET_IF=$(grep "^internet_interface" /etc/zoplog/zoplog.conf | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
+            INTERNAL_IF=$(grep "^internal_interface" /etc/zoplog/zoplog.conf | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
+            BRIDGE_MODE=$(grep "^bridge_mode" /etc/zoplog/zoplog.conf | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
         fi
     else
-        echo
-        echo -e "${BLUE}Manual reboot required:${NC}"
-        echo -e "  ${YELLOW}sudo reboot${NC}"
-        echo
-        echo -e "${GREEN}Installation complete! Please reboot to activate the network bridge.${NC}"
+        log_error "No existing ZopLog configuration found. Please run full installation first."
+        exit 1
     fi
+    
+    # Run only the required upgrade functions
+    download_zoplog
+    setup_sudoers
+    setup_scripts
+    create_database_schema
+    setup_systemd_services
+    
+    show_completion_message "upgrade"
 }
 
 main() {
@@ -1411,8 +1510,12 @@ main() {
     setup_transparent_proxy
     setup_systemd_services
     
-    show_completion_message
+    show_completion_message "install"
 }
 
-# Run main function
-main "$@"
+# Main execution logic
+if [ "$UPGRADE_MODE" = true ]; then
+    upgrade "$@"
+else
+    main "$@"
+fi
