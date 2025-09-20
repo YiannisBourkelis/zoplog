@@ -1454,10 +1454,10 @@ upgrade() {
         log_info "Loading existing database configuration..."
         # Extract credentials from INI file, removing quotes and whitespace
         # Handle both formats: "key = value" and "key=value"
-        DB_HOST=$(grep "^host" /etc/zoplog/database.conf | sed 's/.*= *//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
-        DB_USER=$(grep "^user" /etc/zoplog/database.conf | sed 's/.*= *//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
-        DB_PASS=$(grep "^password" /etc/zoplog/database.conf | sed 's/.*= *//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
-        DB_NAME=$(grep "^name" /etc/zoplog/database.conf | sed 's/.*= *//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
+        DB_HOST=$(grep "^host" /etc/zoplog/database.conf | awk -F' = ' '{print $2}' | sed 's/^"//;s/"$//')
+        DB_USER=$(grep "^user" /etc/zoplog/database.conf | awk -F' = ' '{print $2}' | sed 's/^"//;s/"$//')
+        DB_PASS=$(grep "^password" /etc/zoplog/database.conf | awk -F' = ' '{print $2}' | sed 's/^"//;s/"$//')
+        DB_NAME=$(grep "^name" /etc/zoplog/database.conf | awk -F' = ' '{print $2}' | sed 's/^"//;s/"$//')
         
         # Load system configuration
         if [ -f "/etc/zoplog/zoplog.conf" ]; then

@@ -1,32 +1,33 @@
 <?php
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
 header("Content-Type: application/json");
 require_once __DIR__ . '/../zoplog_config.php';
 
 // Simplified parallel execution using single connection with optimized queries
 $query30 = "
     SELECT
-        d.domain as blocked_domain,
-        COUNT(*) as block_count
-    FROM blocked_events be
-    INNER JOIN domain_ip_addresses dip ON dip.ip_address_id = be.wan_ip_id
-    INNER JOIN domains d ON d.id = dip.domain_id
-    WHERE be.event_time >= NOW() - INTERVAL 30 DAY
-    GROUP BY d.id
-    ORDER BY block_count DESC
-    LIMIT 30
+        domains.domain as blocked_domain,
+        domain_ip_addresses.blocked_count as block_count
+        FROM domain_ip_addresses
+        INNER JOIN domains ON domain_ip_addresses.domain_id = domains.id
+        WHERE last_seen >= NOW() - INTERVAL 30 DAY
+
+        ORDER BY blocked_count DESC
+        LIMIT 10
 ";
 
 $query365 = "
     SELECT
-        d.domain as blocked_domain,
-        COUNT(*) as block_count
-    FROM blocked_events be
-    INNER JOIN domain_ip_addresses dip ON dip.ip_address_id = be.wan_ip_id
-    INNER JOIN domains d ON d.id = dip.domain_id
-    WHERE be.event_time >= NOW() - INTERVAL 365 DAY
-    GROUP BY d.id
-    ORDER BY block_count DESC
-    LIMIT 30
+        domains.domain as blocked_domain,
+        domain_ip_addresses.blocked_count as block_count
+        FROM domain_ip_addresses
+        INNER JOIN domains ON domain_ip_addresses.domain_id = domains.id
+        WHERE last_seen >= NOW() - INTERVAL 365 DAY
+
+        ORDER BY blocked_count DESC
+        LIMIT 10
 ";
 
 // Execute queries sequentially but with optimized settings

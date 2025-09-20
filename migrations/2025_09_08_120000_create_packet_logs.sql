@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS `blocked_events` (
   KEY `idx_wan_ip` (`wan_ip_id`),
   KEY `idx_event_time_ip_port` (`event_time`, `src_ip_id`, `dst_ip_id`, `dst_port`),
   KEY `idx_dst_ip_event_time` (`dst_ip_id`, `event_time`),
+  KEY `idx_blocked_events_event_time_wan_ip` (`event_time`, `wan_ip_id`),
   CONSTRAINT `fk_blocked_events_src_ip` FOREIGN KEY (`src_ip_id`) REFERENCES `ip_addresses` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_blocked_events_dst_ip` FOREIGN KEY (`dst_ip_id`) REFERENCES `ip_addresses` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_blocked_events_wan_ip` FOREIGN KEY (`wan_ip_id`) REFERENCES `ip_addresses` (`id`) ON DELETE SET NULL
