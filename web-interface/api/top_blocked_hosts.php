@@ -7,27 +7,29 @@ require_once __DIR__ . '/../zoplog_config.php';
 
 // Simplified parallel execution using single connection with optimized queries
 $query30 = "
-    SELECT
-        domains.domain as blocked_domain,
-        domain_ip_addresses.blocked_count as block_count
-        FROM domain_ip_addresses
-        INNER JOIN domains ON domain_ip_addresses.domain_id = domains.id
-        WHERE last_seen >= NOW() - INTERVAL 30 DAY
-
-        ORDER BY blocked_count DESC
-        LIMIT 10
+SELECT domains.domain AS blocked_domain,
+COUNT(*) AS block_count
+FROM domains
+RIGHT JOIN domain_ip_addresses ON domains.id = domain_ip_addresses.domain_id
+RIGHT JOIN ip_addresses ON domain_ip_addresses.ip_address_id = ip_addresses.id
+RIGHT JOIN blocked_events ON ip_addresses.id = blocked_events.wan_ip_id
+WHERE blocked_events.event_time >= NOW() - INTERVAL 400000 SECOND
+GROUP BY domains.domain
+ORDER BY COUNT(*) DESC
+LIMIT 10
 ";
 
 $query365 = "
-    SELECT
-        domains.domain as blocked_domain,
-        domain_ip_addresses.blocked_count as block_count
-        FROM domain_ip_addresses
-        INNER JOIN domains ON domain_ip_addresses.domain_id = domains.id
-        WHERE last_seen >= NOW() - INTERVAL 365 DAY
-
-        ORDER BY blocked_count DESC
-        LIMIT 10
+SELECT domains.domain AS blocked_domain,
+COUNT(*) AS block_count
+FROM domains
+RIGHT JOIN domain_ip_addresses ON domains.id = domain_ip_addresses.domain_id
+RIGHT JOIN ip_addresses ON domain_ip_addresses.ip_address_id = ip_addresses.id
+RIGHT JOIN blocked_events ON ip_addresses.id = blocked_events.wan_ip_id
+WHERE blocked_events.event_time >= NOW() - INTERVAL 365 DAY
+GROUP BY domains.domain
+ORDER BY COUNT(*) DESC
+LIMIT 10
 ";
 
 // Execute queries sequentially but with optimized settings
