@@ -15,9 +15,7 @@ $allowedRequests = $allowedRes->fetch_assoc()["cnt"];
 
 $blockedRes = $mysqli->query("
     SELECT COUNT(DISTINCT CONCAT(
-        COALESCE(src_ip_id, ''), '-',
-        COALESCE(dst_ip_id, ''), '-', 
-        COALESCE(dst_port, ''), '-',
+        wan_ip_id, '-',
         FLOOR(UNIX_TIMESTAMP(event_time) / 30) -- 30-second dedup window
     )) AS cnt 
     FROM blocked_events
@@ -28,8 +26,8 @@ $totalRequests = $allowedRequests + $blockedRequests;
 
 // Unique IPs
 $uniqueRes = $mysqli->query("
-    SELECT COUNT(DISTINCT src_ip_id) + COUNT(DISTINCT dst_ip_id) AS cnt 
-    FROM packet_logs
+    SELECT COUNT(DISTINCT id) AS cnt 
+    FROM ip_addresses
 ");
 $uniqueIPs = $uniqueRes->fetch_assoc()["cnt"];
 

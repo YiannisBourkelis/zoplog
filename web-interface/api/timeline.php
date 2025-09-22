@@ -14,9 +14,7 @@ $allowedTimelineRes = $mysqli->query("
 $blockedTimelineRes = $mysqli->query("
     SELECT DATE_FORMAT(event_time, '%H:%i') AS minute,
            COUNT(DISTINCT CONCAT(
-               COALESCE(src_ip_id, ''), '-',
-               COALESCE(dst_ip_id, ''), '-',
-               COALESCE(dst_port, ''), '-',
+               wan_ip_id, '-',
                FLOOR(UNIX_TIMESTAMP(event_time) / 30)
            )) AS cnt
     FROM blocked_events
