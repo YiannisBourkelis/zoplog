@@ -163,13 +163,23 @@ def insert_block_event(conn, cursor, direction: str, fields: Dict[str, str], raw
         )
     
     # Increment blocked_count for the related domain_ip_addresses row
-    # Only if last_seen is more than 30 seconds ago (deduplication)
+    # Only if last_seen is more than 5 seconds ago (deduplication)
     if wan_ip_id and domain_id:
         cursor.execute("""
             UPDATE domain_ip_addresses 
             SET blocked_count = blocked_count + 1, last_seen = NOW()
-            WHERE ip_address_id = %s AND domain_id = %s 
-        """, (wan_ip_id, domain_id))
+            WHERE ip_address_id = %s AND domain_id = %s
+            AND (
+                SELECT MAX(event_time) 
+                FROM blocked_events 
+                WHERE src_ip_id = %s AND dst_ip_id = %s
+            ) > domain_ip_addresses.last_seen + INTERVAL 5 SECOND
+            OR NOT EXISTS (
+                SELECT 1 
+                FROM blocked_events 
+                WHERE src_ip_id = %s AND dst_ip_id = %s
+            )
+        """, (wan_ip_id, domain_id, src_ip_id, dst_ip_id, src_ip_id, dst_ip_id))
 
     
 
