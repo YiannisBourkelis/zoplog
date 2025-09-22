@@ -161,6 +161,17 @@ def insert_block_event(conn, cursor, direction: str, fields: Dict[str, str], raw
             "INSERT INTO blocked_event_messages (id, message) VALUES (%s, %s)",
             (event_id, raw[:65535]),
         )
+    
+    # Increment blocked_count for the related domain_ip_addresses row
+    # Only if last_seen is more than 30 seconds ago (deduplication)
+    if wan_ip_id and domain_id:
+        cursor.execute("""
+            UPDATE domain_ip_addresses 
+            SET blocked_count = blocked_count + 1, last_seen = NOW()
+            WHERE ip_address_id = %s AND domain_id = %s 
+        """, (wan_ip_id, domain_id))
+
+    
 
 def journal_reader():
     r = sd_journal.Reader()
