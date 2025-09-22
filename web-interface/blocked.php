@@ -333,7 +333,7 @@
             <th class="px-4 py-2">Dst</th>
             <th class="px-4 py-2">IN Iface</th>
             <th class="px-4 py-2">OUT Iface</th>
-            <th class="px-4 py-2">Message</th>
+            <th class="px-2 py-2"></th>
           </tr>
         </thead>
         <tbody id="logs-body"></tbody>
@@ -449,9 +449,12 @@ function renderRow(row) {
     <td class="px-4 py-2">${dstIp}</td>
     <td class="px-4 py-2">${ifaceIn}</td>
     <td class="px-4 py-2">${ifaceOut}</td>
-    <td class="px-4 py-2">
-      <button onclick="showMessage(${row.id})" class="text-blue-600 hover:text-blue-800 underline text-sm">
-        View Message
+    <td class="px-2 py-2 text-right">
+      <button onclick="showMessage(${row.id})" class="text-gray-500 hover:text-blue-600 transition-colors duration-200 p-1" title="View Message">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="10" stroke-width="2"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 16v-4m0-4h.01"/>
+        </svg>
       </button>
     </td>
     <div class="hover-actions">${actions}</div>
@@ -859,8 +862,11 @@ async function fetchBlocked(reset=false, prepend=false) {
             <td>${row.latest_iface_in || ''}</td>
             <td>${row.latest_iface_out || ''}</td>
             <td>
-              <button onclick="showMessage(${row.id})" class="px-3 py-1 text-xs bg-blue-500 hover:bg-blue-600 text-white rounded-md transition-colors duration-200 shadow-sm">
-                View Message
+              <button onclick="showMessage(${row.id})" class="text-gray-500 hover:text-blue-600 transition-colors duration-200 p-1" title="View Message">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="10" stroke-width="2"/>
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 16v-4m0-4h.01"/>
+                </svg>
               </button>
             </td>
             <td>
@@ -952,8 +958,11 @@ async function fetchBlocked(reset=false, prepend=false) {
           <td>${row.latest_iface_in || ''}</td>
           <td>${row.latest_iface_out || ''}</td>
           <td>
-            <button onclick="showMessage(${row.id})" class="px-3 py-1 text-xs bg-blue-500 hover:bg-blue-600 text-white rounded-md transition-colors duration-200 shadow-sm">
-              View Message
+            <button onclick="showMessage(${row.id})" class="text-gray-500 hover:text-blue-600 transition-colors duration-200 p-1" title="View Message">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10" stroke-width="2"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 16v-4m0-4h.01"/>
+              </svg>
             </button>
           </td>
           <td>
@@ -1027,7 +1036,7 @@ async function fetchBlocked(reset=false, prepend=false) {
 function addRowClickListeners(tr) {
   tr.addEventListener('click', (e) => {
     // Prevent triggering if clicking on a button or expand toggle
-    if (e.target.tagName === 'BUTTON' || e.target.classList.contains('expand-toggle')) {
+    if (e.target.closest('button') || e.target.classList.contains('expand-toggle')) {
       return;
     }
     
