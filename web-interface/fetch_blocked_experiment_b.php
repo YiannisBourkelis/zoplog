@@ -13,15 +13,15 @@ try {
 
     $where_conditions = [];
     if ($last_id) {
-        $where_conditions[] = "be.id < " . intval($last_id);
+        $where_conditions[] = "id < " . intval($last_id);
     }
     if ($latest_id !== null) {
-        $where_conditions[] = "be.id > " . intval($latest_id);
+        $where_conditions[] = "id > " . intval($latest_id);
     }
     
     // Safeguard: if both conditions exist and would create impossible query, prioritize latest_id (newer data)
     if ($last_id && $latest_id !== null && intval($last_id) <= intval($latest_id)) {
-        $where_conditions = ["be.id > " . intval($latest_id)]; // Only use latest_id
+        $where_conditions = ["id > " . intval($latest_id)]; // Only use latest_id
     }
     
     $where_clause = !empty($where_conditions) ? "WHERE " . implode(" AND ", $where_conditions) : "";
