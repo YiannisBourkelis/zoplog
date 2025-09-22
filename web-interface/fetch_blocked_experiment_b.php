@@ -43,7 +43,7 @@ try {
         be.iface_out,
         be.wan_ip_id AS primary_ip_id,
         wan_ip.ip_address AS primary_ip,
-        GROUP_CONCAT(DISTINCT d.domain ORDER BY d.domain SEPARATOR '|') AS all_hostnames
+        GROUP_CONCAT(DISTINCT d.domain ORDER BY dia.last_seen DESC, d.domain SEPARATOR '|') AS all_hostnames
     FROM (
         SELECT * FROM blocked_events {$where_clause} ORDER BY id DESC LIMIT {$limit}
     ) be
@@ -51,13 +51,10 @@ try {
     LEFT JOIN ip_addresses dst_ip ON be.dst_ip_id = dst_ip.id
     LEFT JOIN ip_addresses wan_ip ON be.wan_ip_id = wan_ip.id
     LEFT JOIN domain_ip_addresses dia ON dia.ip_address_id = be.wan_ip_id 
-        AND dia.last_seen = (
-            SELECT MAX(last_seen) 
-            FROM domain_ip_addresses 
-            WHERE ip_address_id = be.wan_ip_id
-        )
+        AND dia.last_seen >= DATE_SUB(NOW(), INTERVAL 1 DAY)
     LEFT JOIN domains d ON dia.domain_id = d.id
-    GROUP BY be.id";
+    GROUP BY be.id
+    ORDER BY be.id DESC";
 
     $result = $mysqli->query($sql);
 
