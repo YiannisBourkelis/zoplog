@@ -33,7 +33,7 @@ try {
         be.dst_port,
         be.iface_in,
         be.iface_out,
-        be.message,
+        bem.message,
         CASE
             WHEN be.direction = 'IN' THEN be.src_ip_id
             WHEN be.direction = 'OUT' THEN be.dst_ip_id
@@ -46,6 +46,7 @@ try {
         END AS primary_ip,
         GROUP_CONCAT(DISTINCT bd.domain ORDER BY bd.domain SEPARATOR '|') AS all_hostnames
     FROM blocked_events be
+    LEFT JOIN blocked_event_messages bem ON be.id = bem.id
     LEFT JOIN ip_addresses src_ip ON be.src_ip_id = src_ip.id
     LEFT JOIN ip_addresses dst_ip ON be.dst_ip_id = dst_ip.id
     LEFT JOIN blocked_ips bi ON bi.ip_id = (
@@ -58,7 +59,7 @@ try {
     LEFT JOIN blocklist_domains bd ON bi.blocklist_domain_id = bd.id
     {$where_clause}
     GROUP BY be.id, be.event_time, be.direction, be.proto, be.src_ip_id, be.dst_ip_id,
-             be.src_port, be.dst_port, be.iface_in, be.iface_out, be.message
+             be.src_port, be.dst_port, be.iface_in, be.iface_out, bem.message
     ORDER BY be.id DESC
     LIMIT {$limit}";
 

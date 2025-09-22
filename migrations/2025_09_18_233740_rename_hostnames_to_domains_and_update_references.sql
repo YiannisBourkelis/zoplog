@@ -2,13 +2,7 @@
 -- Created: 2025-09-18 23:37:40
 -- Description: Rename hostnames table to domains, rename hostname column to domain, rename hostname_ip_addresses to domain_ip_addresses
 
--- Rename hostnames table to domains
-RENAME TABLE `hostnames` TO `domains`;
-
--- Rename hostname column to domain in the domains table
-ALTER TABLE `domains` CHANGE `hostname` `domain` varchar(255) NOT NULL;
-
--- Recreate the domain_ip_addresses table (since hostname_ip_addresses was manually dropped)
+-- Create the domain_ip_addresses table 
 CREATE TABLE IF NOT EXISTS `domain_ip_addresses` (
   `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
   `domain_id` bigint(20) UNSIGNED NOT NULL,

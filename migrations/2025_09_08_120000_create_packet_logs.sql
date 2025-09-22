@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS `packet_logs` (
   `dst_ip_id` bigint(20) UNSIGNED DEFAULT NULL,
   `dst_port` int(10) UNSIGNED NOT NULL,
   `method` enum('GET','POST','PUT','DELETE','HEAD','OPTIONS','PATCH','CONNECT','TRACE','PROPFIND','PROPPATCH','MKCOL','COPY','MOVE','LOCK','UNLOCK','N/A','TLS_CLIENTHELLO') DEFAULT 'N/A',
-  `hostname_id` bigint(20) UNSIGNED DEFAULT NULL,
+  `domain_id` bigint(20) UNSIGNED DEFAULT NULL,
   `path_id` bigint(20) UNSIGNED DEFAULT NULL,
   `user_agent_id` bigint(20) UNSIGNED DEFAULT NULL,
   `accept_language_id` bigint(20) UNSIGNED DEFAULT NULL,
@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS `packet_logs` (
   KEY `idx_packet_time` (`packet_timestamp`),
   KEY `idx_src_ip` (`src_ip_id`),
   KEY `idx_dst_ip` (`dst_ip_id`),
-  KEY `idx_hostname` (`hostname_id`),
+  KEY `idx_domain` (`domain_id`),
   KEY `idx_path` (`path_id`),
   KEY `idx_user_agent` (`user_agent_id`),
   KEY `idx_accept_language` (`accept_language_id`),
@@ -32,13 +32,13 @@ CREATE TABLE IF NOT EXISTS `packet_logs` (
   KEY `idx_packet_time_type_method` (`packet_timestamp` DESC,`type`,`method`),
   CONSTRAINT `packet_logs_ibfk_1` FOREIGN KEY (`src_ip_id`) REFERENCES `ip_addresses` (`id`),
   CONSTRAINT `packet_logs_ibfk_2` FOREIGN KEY (`dst_ip_id`) REFERENCES `ip_addresses` (`id`),
-  CONSTRAINT `packet_logs_ibfk_3` FOREIGN KEY (`hostname_id`) REFERENCES `hostnames` (`id`),
+  CONSTRAINT `packet_logs_ibfk_3` FOREIGN KEY (`domain_id`) REFERENCES `domains` (`id`),
   CONSTRAINT `packet_logs_ibfk_4` FOREIGN KEY (`path_id`) REFERENCES `paths` (`id`),
   CONSTRAINT `packet_logs_ibfk_5` FOREIGN KEY (`user_agent_id`) REFERENCES `user_agents` (`id`),
   CONSTRAINT `packet_logs_ibfk_6` FOREIGN KEY (`accept_language_id`) REFERENCES `accept_languages` (`id`),
   CONSTRAINT `packet_logs_ibfk_7` FOREIGN KEY (`src_mac_id`) REFERENCES `mac_addresses` (`id`),
   CONSTRAINT `packet_logs_ibfk_8` FOREIGN KEY (`dst_mac_id`) REFERENCES `mac_addresses` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
+) ENGINE=InnoDB ;
 
 -- Blocked events table
 CREATE TABLE IF NOT EXISTS `blocked_events` (
@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS `blocked_events` (
   `src_ip_id` bigint(20) UNSIGNED DEFAULT NULL,
   `dst_ip_id` bigint(20) UNSIGNED DEFAULT NULL,
   `wan_ip_id` bigint(20) UNSIGNED DEFAULT NULL,
+  `domain_id` bigint(20) UNSIGNED DEFAULT NULL,
   `src_port` int(11) DEFAULT NULL,
   `dst_port` int(11) DEFAULT NULL,
   `proto` varchar(8) DEFAULT NULL,
@@ -60,10 +61,12 @@ CREATE TABLE IF NOT EXISTS `blocked_events` (
   KEY `idx_src_ip` (`src_ip_id`),
   KEY `idx_dst_ip` (`dst_ip_id`),
   KEY `idx_wan_ip` (`wan_ip_id`),
-  KEY `idx_event_time_ip_port` (`event_time`, `src_ip_id`, `dst_ip_id`, `dst_port`),
+  KEY `idx_blocked_events_domain_id` (`domain_id`),
   KEY `idx_dst_ip_event_time` (`dst_ip_id`, `event_time`),
+  KEY `idx_blocked_events_ip_time` (`src_ip_id`, `dst_ip_id`, `event_time`),
   KEY `idx_blocked_events_event_time_wan_ip` (`event_time`, `wan_ip_id`),
-  CONSTRAINT `fk_blocked_events_src_ip` FOREIGN KEY (`src_ip_id`) REFERENCES `ip_addresses` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `fk_blocked_events_dst_ip` FOREIGN KEY (`dst_ip_id`) REFERENCES `ip_addresses` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `fk_blocked_events_wan_ip` FOREIGN KEY (`wan_ip_id`) REFERENCES `ip_addresses` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
+  CONSTRAINT `fk_blocked_events_src_ip` FOREIGN KEY (`src_ip_id`) REFERENCES `ip_addresses` (`id`),
+  CONSTRAINT `fk_blocked_events_dst_ip` FOREIGN KEY (`dst_ip_id`) REFERENCES `ip_addresses` (`id`),
+  CONSTRAINT `fk_blocked_events_wan_ip` FOREIGN KEY (`wan_ip_id`) REFERENCES `ip_addresses` (`id`),
+  CONSTRAINT `fk_blocked_events_domain_id` FOREIGN KEY (`domain_id`) REFERENCES `domains` (`id`)
+) ENGINE=InnoDB ;

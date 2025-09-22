@@ -157,9 +157,10 @@ while ($row = $res_hn->fetch_assoc()) {
 }
 
 // Query 2c: latest blocked_event per primary id. We'll prepare a statement and execute per id.
-$sql_latest = "SELECT be.direction, UPPER(be.proto) as proto, be.src_port, be.dst_port, be.iface_in, be.iface_out, be.message, be.event_time,
+$sql_latest = "SELECT be.direction, UPPER(be.proto) as proto, be.src_port, be.dst_port, be.iface_in, be.iface_out, bem.message, be.event_time,
     src_ip.ip_address AS src_ip, dst_ip.ip_address AS dst_ip
 FROM blocked_events be
+LEFT JOIN blocked_event_messages bem ON be.id = bem.id
 LEFT JOIN ip_addresses src_ip ON be.src_ip_id = src_ip.id
 LEFT JOIN ip_addresses dst_ip ON be.dst_ip_id = dst_ip.id
 WHERE (CASE WHEN be.direction = 'OUT' THEN be.dst_ip_id WHEN be.direction = 'IN' THEN be.src_ip_id ELSE be.dst_ip_id END) = ?

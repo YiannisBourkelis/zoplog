@@ -12,7 +12,7 @@ try {
         exit;
     }
 
-    $stmt = $mysqli->prepare("SELECT message FROM blocked_events WHERE id = ?");
+    $stmt = $mysqli->prepare("SELECT message FROM blocked_event_messages WHERE id = ?");
     $stmt->bind_param("i", $id);
     $stmt->execute();
     $result = $stmt->get_result();

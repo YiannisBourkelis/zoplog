@@ -42,8 +42,9 @@ try {
             be.dst_ip_id,
             be.iface_in,
             be.iface_out,
-            be.message
+            bem.message
         FROM blocked_events be
+        LEFT JOIN blocked_event_messages bem ON be.id = bem.id
         LEFT JOIN ip_addresses src_ip ON be.src_ip_id = src_ip.id
         LEFT JOIN ip_addresses dst_ip ON be.dst_ip_id = dst_ip.id
         " . ($last_id ? "WHERE be.id < " . intval($last_id) : "") . "

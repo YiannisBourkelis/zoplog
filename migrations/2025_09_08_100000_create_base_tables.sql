@@ -47,13 +47,13 @@ CREATE TABLE IF NOT EXISTS `user_agents` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;
 
 -- Hostnames table
-CREATE TABLE IF NOT EXISTS `hostnames` (
+CREATE TABLE IF NOT EXISTS `domains` (
   `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
-  `hostname` varchar(255) NOT NULL,
+  `domain` varchar(255) NOT NULL,
   `ip_id` bigint(20) UNSIGNED DEFAULT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `hostname` (`hostname`),
-  KEY `idx_hostname` (`hostname`),
+  UNIQUE KEY `domain` (`domain`),
+  KEY `idx_domain` (`domain`),
   KEY `ip_id` (`ip_id`),
-  CONSTRAINT `hostnames_ibfk_1` FOREIGN KEY (`ip_id`) REFERENCES `ip_addresses` (`id`)
+  CONSTRAINT `domains_ibfk_1` FOREIGN KEY (`ip_id`) REFERENCES `ip_addresses` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci;

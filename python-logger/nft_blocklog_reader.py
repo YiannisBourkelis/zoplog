@@ -63,20 +63,12 @@ def get_or_insert_ip(cursor, ip: Optional[str]) -> Optional[int]:
 
 def get_wan_ip_id(direction: str, src_ip_id: Optional[int], dst_ip_id: Optional[int], iface_in: Optional[str], iface_out: Optional[str], monitoring_interface: str) -> Optional[int]:
     """
-    Determine the WAN IP ID based on direction, interface information, and monitoring interface.
+    Determine the WAN IP ID based on interface information.
     The monitoring interface is the WAN-facing interface.
     """
     if iface_in == monitoring_interface:
         return src_ip_id
-    elif iface_out == monitoring_interface:
-        return dst_ip_id
-
-    # Fallback to old logic if interface doesn't match
-    if direction == 'IN':
-        return src_ip_id
-    elif direction in ('OUT', 'FWD'):
-        return dst_ip_id
-    return None
+    return dst_ip_id
 
 # Inject a space right after the prefix token if glued (e.g., ...-OUTIN=)
 def _normalize_prefix_spacing(msg: str) -> str:
@@ -150,14 +142,25 @@ def insert_block_event(conn, cursor, direction: str, fields: Dict[str, str], raw
 
     wan_ip_id = get_wan_ip_id(direction, src_ip_id, dst_ip_id, iface_in, iface_out, DEFAULT_MONITOR_INTERFACE)
 
+    domain_id = get_domain_id(cursor, wan_ip_id)
+
     cursor.execute(
         """
         INSERT INTO blocked_events
-          (event_time, direction, src_ip_id, dst_ip_id, wan_ip_id, src_port, dst_port, proto, iface_in, iface_out, message)
+          (event_time, direction, src_ip_id, dst_ip_id, wan_ip_id, domain_id, src_port, dst_port, proto, iface_in, iface_out)
         VALUES (NOW(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
-        (direction, src_ip_id, dst_ip_id, wan_ip_id, src_port, dst_port, proto, iface_in, iface_out, raw[:65535]),
+        (direction, src_ip_id, dst_ip_id, wan_ip_id, domain_id, src_port, dst_port, proto, iface_in, iface_out),
     )
+
+    event_id = cursor.lastrowid
+
+    # Insert message into separate table
+    if raw:
+        cursor.execute(
+            "INSERT INTO blocked_event_messages (id, message) VALUES (%s, %s)",
+            (event_id, raw[:65535]),
+        )
 
 def journal_reader():
     r = sd_journal.Reader()
@@ -171,6 +174,13 @@ def journal_reader():
     r.seek_tail()
     r.get_previous()
     return r
+
+def get_domain_id(cursor, wan_ip_id: Optional[int]) -> Optional[int]:
+    if not wan_ip_id:
+        return None
+    cursor.execute("SELECT domain_id FROM domain_ip_addresses WHERE ip_address_id = %s ORDER BY last_seen DESC LIMIT 1", (wan_ip_id,))
+    result = cursor.fetchone()
+    return result[0] if result else None
 
 def main():
     print("Starting nft block log reader (systemd-journal)…", flush=True)
