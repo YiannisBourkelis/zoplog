@@ -7,12 +7,16 @@ require_once __DIR__ . '/../zoplog_config.php';
 
 // Top hosts data
 $topHostsRes = $mysqli->query("
-    SELECT d.domain, dia.allowed_count AS cnt
+SELECT sub.domain, SUM(sub.allowed_count) AS cnt   
+FROM (
+    SELECT d.domain, dia.allowed_count
     FROM domain_ip_addresses dia
     LEFT JOIN domains d ON dia.domain_id = d.id
     WHERE d.domain IS NOT NULL AND dia.allowed_count > 0
-    ORDER BY dia.allowed_count DESC
-    LIMIT 200
+) sub
+GROUP BY sub.domain
+ORDER BY cnt DESC  
+LIMIT 200
 ");
 
 $topHosts = [];
