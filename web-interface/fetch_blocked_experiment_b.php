@@ -5,6 +5,16 @@ header("Content-Type: application/json");
 require_once __DIR__ . '/zoplog_config.php';
 
 try {
+    // Load system settings to get firewall rule timeout
+    $settingsFile = '/etc/zoplog/zoplog.conf';
+    $firewallTimeoutSeconds = 10800; // Default 3 hours
+
+    if (file_exists($settingsFile)) {
+        $settings = parse_ini_file($settingsFile, true);
+        if ($settings !== false && isset($settings['firewall']['firewall_rule_timeout'])) {
+            $firewallTimeoutSeconds = max(1, (int)$settings['firewall']['firewall_rule_timeout']);
+        }
+    }
     // Accept cursor and limit from GET
     $limit = isset($_GET['limit']) ? intval($_GET['limit']) : 200;
     if ($limit <= 0 || $limit > 200) $limit = 200;
@@ -51,7 +61,7 @@ try {
     LEFT JOIN ip_addresses dst_ip ON be.dst_ip_id = dst_ip.id
     LEFT JOIN ip_addresses wan_ip ON be.wan_ip_id = wan_ip.id
     LEFT JOIN domain_ip_addresses dia ON dia.ip_address_id = be.wan_ip_id 
-        AND dia.last_seen >= DATE_SUB(NOW(), INTERVAL 1 DAY)
+        AND dia.last_seen >= DATE_SUB(NOW(), INTERVAL {$firewallTimeoutSeconds} SECOND)
     LEFT JOIN domains d ON dia.domain_id = d.id
     GROUP BY be.id
     ORDER BY be.id DESC";
