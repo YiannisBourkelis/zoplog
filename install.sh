@@ -256,7 +256,8 @@ install_dependencies() {
         bridge-utils \
         iptables \
         netfilter-persistent \
-        iptables-persistent
+        iptables-persistent \
+        chrony
     
     # Install PHP - try newer version first, fallback to system default
     log_info "Installing PHP..."
@@ -864,6 +865,35 @@ EOF
     systemctl enable nginx
     
     log_success "Nginx configured successfully"
+}
+
+setup_chrony() {
+    log_info "Configuring Chrony NTP client for accurate time synchronization..."
+
+    # Backup existing configuration
+    if [ -f /etc/chrony/chrony.conf ]; then
+        cp /etc/chrony/chrony.conf /etc/chrony/chrony.conf.backup
+    fi
+
+    # Copy optimized chrony configuration
+    cp "$ZOPLOG_HOME/zoplog/chrony.conf" /etc/chrony/chrony.conf
+
+    # Restart chrony service
+    systemctl restart chrony
+    systemctl enable chrony
+
+    # Wait for synchronization
+    log_info "Waiting for NTP synchronization..."
+    sleep 5
+
+    # Verify chrony is working
+    if chronyc tracking &>/dev/null; then
+        log_success "Chrony configured and synchronized successfully"
+        log_info "Current time synchronization status:"
+        chronyc tracking | head -5 | while read line; do log_info "  $line"; done
+    else
+        log_warning "Chrony configuration applied but synchronization check failed"
+    fi
 }
 
 setup_php_fpm() {
@@ -1506,6 +1536,7 @@ main() {
     setup_web_interface
     setup_sudoers
     setup_nginx
+    setup_chrony
     setup_php_fpm
     setup_scripts
     create_database_schema
