@@ -251,6 +251,15 @@ def get_or_insert_domain_with_ip(domain, ip_id):
         return domain_id
 
 def get_or_insert_ip(ip_address, cursor=None):
+    # Normalize IPv6 addresses to canonical compressed form
+    if ip_address:
+        try:
+            from ipaddress import ip_address as ip_addr
+            normalized_ip = str(ip_addr(ip_address))
+            ip_address = normalized_ip
+        except (ValueError, ImportError):
+            # Not a valid IP address or ipaddress module not available, use as-is
+            pass
     return get_or_insert("ip_addresses", "ip_address", ip_address, cursor=cursor)
 
 

@@ -11,6 +11,7 @@ and stores events into the database. No schema creation here.
 import re
 import sys
 from typing import Dict, Optional, Tuple
+from ipaddress import ip_address
 
 from zoplog_config import load_database_config, DEFAULT_MONITOR_INTERFACE
 
@@ -54,6 +55,15 @@ def db_connect():
 def get_or_insert_ip(cursor, ip: Optional[str]) -> Optional[int]:
     if not ip:
         return None
+    
+    # Normalize IPv6 addresses to canonical compressed form
+    try:
+        normalized_ip = str(ip_address(ip))
+        ip = normalized_ip
+    except ValueError:
+        # Not a valid IP address, use as-is
+        pass
+    
     cursor.execute(
         "INSERT INTO ip_addresses (ip_address) VALUES (%s) "
         "ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)",
@@ -65,10 +75,34 @@ def get_wan_ip_id(direction: str, src_ip_id: Optional[int], dst_ip_id: Optional[
     """
     Determine the WAN IP ID based on interface information.
     The monitoring interface is the WAN-facing interface.
+
+    For FORWARD chain:
+    - If iface_in contains monitoring_interface (or is the bridge), src_ip is likely WAN
+    - If iface_out contains monitoring_interface (or is the bridge), dst_ip is likely WAN
+
+    For INPUT/OUTPUT chains:
+    - INPUT: dst_ip is local, src_ip is WAN
+    - OUTPUT: src_ip is local, dst_ip is WAN
     """
-    if iface_in == monitoring_interface:
+    if direction == "FWD":
+        # Forward chain - check which interface is the WAN interface
+        # Often iface_in/out are bridge interfaces, so we need to be smarter
+        if iface_in and monitoring_interface in iface_in:
+            return src_ip_id  # Traffic coming from WAN
+        elif iface_out and monitoring_interface in iface_out:
+            return dst_ip_id  # Traffic going to WAN
+        else:
+            # Fallback: assume src_ip for incoming traffic on monitored interface
+            return src_ip_id
+    elif direction == "IN":
+        # Input chain - src_ip is from WAN
         return src_ip_id
-    return dst_ip_id
+    elif direction == "OUT":
+        # Output chain - dst_ip is to WAN
+        return dst_ip_id
+    else:
+        # Unknown direction, fallback to src_ip
+        return src_ip_id
 
 # Inject a space right after the prefix token if glued (e.g., ...-OUTIN=)
 def _normalize_prefix_spacing(msg: str) -> str:
@@ -163,7 +197,7 @@ def insert_block_event(conn, cursor, direction: str, fields: Dict[str, str], raw
         )
     
     # Increment blocked_count for the related domain_ip_addresses row
-    # Only if last_seen is more than 5 seconds ago (deduplication)
+    # Only increment if this is not a duplicate event within 5 seconds
     if wan_ip_id and domain_id:
         cursor.execute("""
             UPDATE domain_ip_addresses 
