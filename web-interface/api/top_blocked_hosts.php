@@ -7,29 +7,33 @@ require_once __DIR__ . '/../zoplog_config.php';
 
 // Simplified parallel execution using single connection with optimized queries
 $query30 = "
-SELECT domains.domain AS blocked_domain,
-COUNT(*) AS block_count
-FROM domains
-RIGHT JOIN domain_ip_addresses ON domains.id = domain_ip_addresses.domain_id
-RIGHT JOIN ip_addresses ON domain_ip_addresses.ip_address_id = ip_addresses.id
-RIGHT JOIN blocked_events ON ip_addresses.id = blocked_events.wan_ip_id
-WHERE blocked_events.event_time >= NOW() - INTERVAL 400000 SECOND
-GROUP BY domains.domain
-ORDER BY COUNT(*) DESC
-LIMIT 10
+SELECT sub.domain, SUM(sub.blocked_count) AS block_count
+FROM (
+    SELECT d.domain, dia.blocked_count
+    FROM domain_ip_addresses dia
+    LEFT JOIN domains d ON dia.domain_id = d.id
+    WHERE d.domain IS NOT NULL
+    AND dia.last_seen >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+) sub
+GROUP BY sub.domain
+HAVING SUM(sub.blocked_count) > 0
+ORDER BY SUM(sub.blocked_count) DESC
+LIMIT 200
 ";
 
 $query365 = "
-SELECT domains.domain AS blocked_domain,
-COUNT(*) AS block_count
-FROM domains
-RIGHT JOIN domain_ip_addresses ON domains.id = domain_ip_addresses.domain_id
-RIGHT JOIN ip_addresses ON domain_ip_addresses.ip_address_id = ip_addresses.id
-RIGHT JOIN blocked_events ON ip_addresses.id = blocked_events.wan_ip_id
-WHERE blocked_events.event_time >= NOW() - INTERVAL 365 DAY
-GROUP BY domains.domain
-ORDER BY COUNT(*) DESC
-LIMIT 10
+SELECT sub.domain, SUM(sub.blocked_count) AS block_count
+FROM (
+    SELECT d.domain, dia.blocked_count
+    FROM domain_ip_addresses dia
+    LEFT JOIN domains d ON dia.domain_id = d.id
+    WHERE d.domain IS NOT NULL
+    AND dia.last_seen >= DATE_SUB(NOW(), INTERVAL 365 DAY)
+) sub
+GROUP BY sub.domain
+HAVING SUM(sub.blocked_count) > 0
+ORDER BY SUM(sub.blocked_count) DESC
+LIMIT 200
 ";
 
 // Execute queries sequentially but with optimized settings
@@ -58,7 +62,7 @@ $blockedDomains30 = [];
 if ($topBlocked30 && $topBlocked30->num_rows > 0) {
     while ($row = $topBlocked30->fetch_assoc()) {
         $blockedDomains30[] = [
-            'blocked_host' => $row['blocked_domain'],
+            'blocked_host' => $row['domain'],
             'cnt' => (int)$row['block_count']
         ];
     }
@@ -71,7 +75,7 @@ $blockedDomains365 = [];
 if ($topBlocked365 && $topBlocked365->num_rows > 0) {
     while ($row = $topBlocked365->fetch_assoc()) {
         $blockedDomains365[] = [
-            'blocked_host' => $row['blocked_domain'],
+            'blocked_host' => $row['domain'],
             'cnt' => (int)$row['block_count']
         ];
     }
