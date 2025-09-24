@@ -86,7 +86,6 @@ if ($res) {
             <div class="flex items-center gap-2">
               <span class="text-xs px-2 py-1 rounded <?= htmlspecialchars($b['category']) === 'social' ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700' ?>"><?= htmlspecialchars(ucfirst($b['category'])) ?></span>
               <span class="text-xs px-2 py-1 rounded <?= $b['type'] === 'system' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700' ?>"><?= htmlspecialchars(ucfirst($b['type'])) ?></span>
-              <span class="text-xs px-2 py-1 rounded bg-gray-100 text-gray-700"><?= (int)($b['domains_count'] ?? 0) ?> domains</span>
             </div>
             <div class="flex items-center gap-2">
               <button type="button" class="toggle-active flex items-center px-2 py-1 rounded-full transition-colors <?= ($b['active']==='active') ? 'active bg-green-100 text-green-700' : 'inactive bg-gray-100 text-gray-700' ?>" data-id="<?= (int)$b['id'] ?>">
@@ -100,6 +99,7 @@ if ($res) {
                   <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5h.01M12 12h.01M12 19h.01" /></svg>
                 </button>
                 <div class="menu-popup fixed w-24 bg-white border rounded shadow-lg hidden z-50" data-id="<?= (int)$b['id'] ?>" style="top:0;left:0;">
+                  <button class="reload-btn w-full text-left px-3 py-2 text-sm hover:bg-gray-100" data-id="<?= (int)$b['id'] ?>">Reload</button>
                   <button class="edit-btn w-full text-left px-3 py-2 text-sm hover:bg-gray-100" data-id="<?= (int)$b['id'] ?>">Edit</button>
                   <?php if ($b['type'] !== 'system'): ?>
                     <button class="delete-btn w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50" data-id="<?= (int)$b['id'] ?>">Delete</button>
@@ -108,13 +108,16 @@ if ($res) {
               </div>
             </div>
           </div>
+          <div class="flex items-center mb-2">
+            <span class="text-xs px-2 py-1 rounded bg-gray-100 text-gray-700"><?= (int)($b['domains_count'] ?? 0) ?> domains</span>
+          </div>
           <h3 class="font-bold text-lg mb-1 break-all relative"><?= htmlspecialchars($b['url']) ?></h3>
           <?php if (!empty($b['description'])): ?>
             <p class="text-sm text-gray-700 mb-2 relative"><?= htmlspecialchars($b['description']) ?></p>
           <?php endif; ?>
           <div class="flex justify-between text-xs text-gray-500 mt-auto relative">
             <span>Date Added: <?= htmlspecialchars($b['created_at']) ?></span>
-            <span>Last Updated: <?= htmlspecialchars($b['updated_at']) ?></span>
+            <span class="last-updated-timestamp">Last Updated: <?= htmlspecialchars($b['updated_at']) ?></span>
           </div>
         </div>
       <?php endforeach; ?>
@@ -222,7 +225,52 @@ if ($res) {
       b.addEventListener('click', (e) => {
         e.stopPropagation();
         const id = b.dataset.id;
+        // Hide the popup
+        const popup = document.querySelector(`.menu-popup[data-id="${id}"]`);
+        if (popup) popup.classList.add('hidden');
         window.location.href = 'blocklist_view.php?list=' + id;
+      });
+    });
+
+    // Reload -> server reload and update card
+    document.querySelectorAll('.reload-btn').forEach(b => {
+      b.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = b.dataset.id;
+        // Hide the popup immediately
+        const popup = document.querySelector(`.menu-popup[data-id="${id}"]`);
+        if (popup) popup.classList.add('hidden');
+        
+        if (!confirm('Reload this blocklist? This will download the latest version from the source URL.')) return;
+        try {
+          const res = await fetch('reload_blocklist.php', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ id }) });
+          const json = await res.json();
+          if (json.status === 'ok') {
+            // Update domain count in the card
+            const card = document.querySelector(`button.toggle-active[data-id="${id}"]`).closest('.bg-white');
+            const domainBadge = card.querySelector('span.bg-gray-100');
+            if (domainBadge) {
+              domainBadge.textContent = json.domains_count + ' domains';
+            }
+            // Update last updated timestamp
+            const timestampSpan = card.querySelector('.last-updated-timestamp');
+            if (timestampSpan) {
+              const now = new Date();
+              const formattedDate = now.getFullYear() + '-' + 
+                String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+                String(now.getDate()).padStart(2, '0') + ' ' + 
+                String(now.getHours()).padStart(2, '0') + ':' + 
+                String(now.getMinutes()).padStart(2, '0') + ':' + 
+                String(now.getSeconds()).padStart(2, '0');
+              timestampSpan.textContent = 'Last Updated: ' + formattedDate;
+            }
+            alert(`Blocklist reloaded successfully. ${json.domains_count} domains loaded.`);
+          } else {
+            alert('Failed to reload blocklist: ' + json.message);
+          }
+        } catch (err) {
+          alert('Network error while reloading blocklist.');
+        }
       });
     });
 
@@ -231,6 +279,10 @@ if ($res) {
       b.addEventListener('click', async (e) => {
         e.stopPropagation();
         const id = b.dataset.id;
+        // Hide the popup immediately
+        const popup = document.querySelector(`.menu-popup[data-id="${id}"]`);
+        if (popup) popup.classList.add('hidden');
+        
         if (!confirm('Delete this blocklist?')) return;
         try {
           const res = await fetch('delete_blocklist.php', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ id }) });
