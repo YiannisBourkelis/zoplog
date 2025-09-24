@@ -71,37 +71,14 @@ def get_or_insert_ip(cursor, ip: Optional[str]) -> Optional[int]:
     )
     return cursor.lastrowid
 
-def get_wan_ip_id(direction: str, src_ip_id: Optional[int], dst_ip_id: Optional[int], iface_in: Optional[str], iface_out: Optional[str], monitoring_interface: str) -> Optional[int]:
+def get_wan_ip_id(direction: str, src_ip_id: Optional[int], dst_ip_id: Optional[int], phys_iface_in: Optional[str], phys_iface_out: Optional[str], monitoring_interface: str) -> Optional[int]:
     """
     Determine the WAN IP ID based on interface information.
     The monitoring interface is the WAN-facing interface.
-
-    For FORWARD chain:
-    - If iface_in contains monitoring_interface (or is the bridge), src_ip is likely WAN
-    - If iface_out contains monitoring_interface (or is the bridge), dst_ip is likely WAN
-
-    For INPUT/OUTPUT chains:
-    - INPUT: dst_ip is local, src_ip is WAN
-    - OUTPUT: src_ip is local, dst_ip is WAN
     """
-    if direction == "FWD":
-        # Forward chain - check which interface is the WAN interface
-        # Often iface_in/out are bridge interfaces, so we need to be smarter
-        if iface_in and monitoring_interface in iface_in:
-            return src_ip_id  # Traffic coming from WAN
-        elif iface_out and monitoring_interface in iface_out:
-            return dst_ip_id  # Traffic going to WAN
-        else:
-            # Fallback: assume src_ip for incoming traffic on monitored interface
-            return src_ip_id
-    elif direction == "IN":
-        # Input chain - src_ip is from WAN
-        return src_ip_id
-    elif direction == "OUT":
-        # Output chain - dst_ip is to WAN
+    if phys_iface_in != "monitoring_interface":
         return dst_ip_id
     else:
-        # Unknown direction, fallback to src_ip
         return src_ip_id
 
 # Inject a space right after the prefix token if glued (e.g., ...-OUTIN=)
@@ -156,6 +133,8 @@ def parse_log_line(line: str) -> Optional[Tuple[str, Dict[str, str]]]:
 def insert_block_event(conn, cursor, direction: str, fields: Dict[str, str], raw: str):
     iface_in = fields.get("IN")
     iface_out = fields.get("OUT")
+    phys_iface_in = fields.get("PHYSIN")
+    phys_iface_out = fields.get("PHYSOUT")
     proto = fields.get("PROTO")
     src_ip = fields.get("SRC")
     dst_ip = fields.get("DST")
@@ -174,7 +153,9 @@ def insert_block_event(conn, cursor, direction: str, fields: Dict[str, str], raw
     src_ip_id = get_or_insert_ip(cursor, src_ip)
     dst_ip_id = get_or_insert_ip(cursor, dst_ip)
 
-    wan_ip_id = get_wan_ip_id(direction, src_ip_id, dst_ip_id, iface_in, iface_out, DEFAULT_MONITOR_INTERFACE)
+    # TODO: Also store phys_iface_in/phys_iface_out in DB
+
+    wan_ip_id = get_wan_ip_id(direction, src_ip_id, dst_ip_id, phys_iface_in, phys_iface_out, DEFAULT_MONITOR_INTERFACE)
 
     domain_id = get_domain_id(cursor, wan_ip_id)
 
