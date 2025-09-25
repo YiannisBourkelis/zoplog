@@ -216,39 +216,27 @@ def get_or_insert_domain_with_ip(domain, ip_id):
         return None
 
     conn, cursor = get_db_connection()
-    # First check if domain exists
-    cursor.execute("SELECT id FROM domains WHERE domain = %s", (domain,))
-    result = cursor.fetchone()
 
-    if result:
-        domain_id = result[0]
-        # Check if IP relationship exists in pivot table
-        cursor.execute("SELECT id FROM domain_ip_addresses WHERE domain_id = %s AND ip_address_id = %s", (domain_id, ip_id))
-        if not cursor.fetchone() and ip_id:
-            # Create relationship if it doesn't exist
-            cursor.execute(
-                "INSERT INTO domain_ip_addresses (domain_id, ip_address_id) VALUES (%s, %s)",
-                (domain_id, ip_id)
-            )
-        conn.commit()
-        return domain_id
-    else:
-        # Insert new domain
+    # Insert domain and get ID in one statement (works for both insert and existing)
+    cursor.execute(
+        "INSERT INTO domains (domain) VALUES (%s) "
+        "ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)",
+        (domain,)
+    )
+    domain_id = cursor.lastrowid
+
+    # Create or update IP relationship in one statement
+    # For new relationships: set allowed_count = 1, first_seen and last_seen to current time
+    # For existing relationships: increment allowed_count and explicitly update last_seen
+    if ip_id:
         cursor.execute(
-            "INSERT INTO domains (domain) VALUES (%s)",
-            (domain,)
+            "INSERT INTO domain_ip_addresses (domain_id, ip_address_id, allowed_count, first_seen, last_seen) VALUES (%s, %s, 1, NOW(), NOW()) "
+            "ON DUPLICATE KEY UPDATE allowed_count = allowed_count + 1, last_seen = NOW()",
+            (domain_id, ip_id)
         )
-        domain_id = cursor.lastrowid
 
-        # Create IP relationship if IP provided
-        if ip_id:
-            cursor.execute(
-                "INSERT INTO domain_ip_addresses (domain_id, ip_address_id) VALUES (%s, %s)",
-                (domain_id, ip_id)
-            )
-
-        conn.commit()
-        return domain_id
+    conn.commit()
+    return domain_id
 
 def get_or_insert_ip(ip_address, cursor=None):
     # Normalize IPv6 addresses to canonical compressed form
@@ -296,14 +284,6 @@ def insert_packet_log(packet_timestamp, src_ip, src_port, dst_ip, dst_port,
               src_mac_id, dst_mac_id,
               method, domain_id, path_id, user_agent_id, accept_language_id, pkt_type))
 
-        # Increment allowed_count in domain_ip_addresses table if we have both domain_id and dst_ip_id
-        if domain_id and dst_ip_id:
-            cursor.execute("""
-                UPDATE domain_ip_addresses
-                SET allowed_count = allowed_count + 1, last_seen = NOW()
-                WHERE domain_id = %s AND ip_address_id = %s
-            """, (domain_id, dst_ip_id))
-
         conn.commit()
 
     except mariadb.Error as e:
@@ -322,15 +302,6 @@ def insert_packet_log(packet_timestamp, src_ip, src_port, dst_ip, dst_port,
                 """, (packet_timestamp, src_ip_id, src_port, dst_ip_id, dst_port,
                       src_mac_id, dst_mac_id,
                       method, domain_id, path_id, user_agent_id, accept_language_id, pkt_type))
-
-                # Increment allowed_count in domain_ip_addresses table if we have both domain_id and dst_ip_id
-                if domain_id and dst_ip_id:
-                    cursor.execute("""
-                        UPDATE domain_ip_addresses
-                        SET allowed_count = allowed_count + 1, last_seen = NOW()
-                        WHERE domain_id = %s AND ip_address_id = %s
-                    """, (domain_id, dst_ip_id))
-
                 conn.commit()
             except Exception as e2:
                 print(f"Packet log insert failed after reconnect: {e2}")
