@@ -10,8 +10,10 @@ and stores events into the database. No schema creation here.
 
 import re
 import sys
+import os
 from typing import Dict, Optional, Tuple
 from ipaddress import ip_address
+import subprocess
 
 from zoplog_config import load_database_config, DEFAULT_MONITOR_INTERFACE
 
@@ -232,7 +234,13 @@ def get_domain_id(cursor, wan_ip_id: Optional[int]) -> Optional[int]:
 
 def main():
     print("Starting nft block log reader (systemd-journal)…", flush=True)
-    print("Tip: run with sudo or add your user to 'systemd-journal' group.", flush=True)
+    
+    # Display current git commit for version tracking
+    try:
+        git_commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=os.path.dirname(__file__)).decode('utf-8').strip()
+        print(f"Git commit: {git_commit}", flush=True)
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        print("Git commit: unknown (not in git repository or git not available)", flush=True)
 
     conn, cursor = db_connect()
     r = journal_reader()
