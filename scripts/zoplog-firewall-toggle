@@ -58,41 +58,41 @@ if [[ "$state" == "active" ]]; then
   nft list set inet "$TABLE" "$SET_V6" >/dev/null 2>&1 || nft add set inet "$TABLE" "$SET_V6" '{ type ipv6_addr; flags interval; }'
 
   add_rule_if_missing input  "zoplog-bl-${id}-input-v4-log"  ip  saddr @"$SET_V4" log prefix "ZOPLOG-BLOCKLIST-IN " level warn
-  add_rule_if_missing input  "zoplog-bl-${id}-input-v4-drop" ip  saddr @"$SET_V4" drop
+  add_rule_if_missing input  "zoplog-bl-${id}-input-v4-reject" ip  saddr @"$SET_V4" reject
   add_rule_if_missing input  "zoplog-bl-${id}-input-v6-log"  ip6 saddr @"$SET_V6" log prefix "ZOPLOG-BLOCKLIST-IN " level warn
-  add_rule_if_missing input  "zoplog-bl-${id}-input-v6-drop" ip6 saddr @"$SET_V6" drop
+  add_rule_if_missing input  "zoplog-bl-${id}-input-v6-reject" ip6 saddr @"$SET_V6" reject
 
   add_rule_if_missing output "zoplog-bl-${id}-output-v4-log"  ip  daddr @"$SET_V4" log prefix "ZOPLOG-BLOCKLIST-OUT " level warn
-  add_rule_if_missing output "zoplog-bl-${id}-output-v4-drop" ip  daddr @"$SET_V4" drop
+  add_rule_if_missing output "zoplog-bl-${id}-output-v4-reject" ip  daddr @"$SET_V4" reject
   add_rule_if_missing output "zoplog-bl-${id}-output-v6-log"  ip6 daddr @"$SET_V6" log prefix "ZOPLOG-BLOCKLIST-OUT " level warn
-  add_rule_if_missing output "zoplog-bl-${id}-output-v6-drop" ip6 daddr @"$SET_V6" drop
+  add_rule_if_missing output "zoplog-bl-${id}-output-v6-reject" ip6 daddr @"$SET_V6" reject
   # FORWARD (bridged/routed)
   add_rule_if_missing forward "zoplog-bl-${id}-forward-v4-saddr-log"  ip  saddr @"$SET_V4" log prefix "ZOPLOG-BLOCKLIST-FWD " level warn
-  add_rule_if_missing forward "zoplog-bl-${id}-forward-v4-saddr-drop" ip  saddr @"$SET_V4" drop
+  add_rule_if_missing forward "zoplog-bl-${id}-forward-v4-saddr-reject" ip  saddr @"$SET_V4" reject
   add_rule_if_missing forward "zoplog-bl-${id}-forward-v4-daddr-log"  ip  daddr @"$SET_V4" log prefix "ZOPLOG-BLOCKLIST-FWD " level warn
-  add_rule_if_missing forward "zoplog-bl-${id}-forward-v4-daddr-drop" ip  daddr @"$SET_V4" drop
+  add_rule_if_missing forward "zoplog-bl-${id}-forward-v4-daddr-reject" ip  daddr @"$SET_V4" reject
   add_rule_if_missing forward "zoplog-bl-${id}-forward-v6-saddr-log"  ip6 saddr @"$SET_V6" log prefix "ZOPLOG-BLOCKLIST-FWD " level warn
-  add_rule_if_missing forward "zoplog-bl-${id}-forward-v6-saddr-drop" ip6 saddr @"$SET_V6" drop
+  add_rule_if_missing forward "zoplog-bl-${id}-forward-v6-saddr-reject" ip6 saddr @"$SET_V6" reject
   add_rule_if_missing forward "zoplog-bl-${id}-forward-v6-daddr-log"  ip6 daddr @"$SET_V6" log prefix "ZOPLOG-BLOCKLIST-FWD " level warn
-  add_rule_if_missing forward "zoplog-bl-${id}-forward-v6-daddr-drop" ip6 daddr @"$SET_V6" drop
+  add_rule_if_missing forward "zoplog-bl-${id}-forward-v6-daddr-reject" ip6 daddr @"$SET_V6" reject
 else
   delete_rule_by_comment input  "zoplog-bl-${id}-input-v4-log"
-  delete_rule_by_comment input  "zoplog-bl-${id}-input-v4-drop"
+  delete_rule_by_comment input  "zoplog-bl-${id}-input-v4-reject"
   delete_rule_by_comment input  "zoplog-bl-${id}-input-v6-log"
-  delete_rule_by_comment input  "zoplog-bl-${id}-input-v6-drop"
+  delete_rule_by_comment input  "zoplog-bl-${id}-input-v6-reject"
   delete_rule_by_comment output "zoplog-bl-${id}-output-v4-log"
-  delete_rule_by_comment output "zoplog-bl-${id}-output-v4-drop"
+  delete_rule_by_comment output "zoplog-bl-${id}-output-v4-reject"
   delete_rule_by_comment output "zoplog-bl-${id}-output-v6-log"
-  delete_rule_by_comment output "zoplog-bl-${id}-output-v6-drop"
+  delete_rule_by_comment output "zoplog-bl-${id}-output-v6-reject"
   # forward deletions
   delete_rule_by_comment forward "zoplog-bl-${id}-forward-v4-saddr-log"
-  delete_rule_by_comment forward "zoplog-bl-${id}-forward-v4-saddr-drop"
+  delete_rule_by_comment forward "zoplog-bl-${id}-forward-v4-saddr-reject"
   delete_rule_by_comment forward "zoplog-bl-${id}-forward-v4-daddr-log"
-  delete_rule_by_comment forward "zoplog-bl-${id}-forward-v4-daddr-drop"
+  delete_rule_by_comment forward "zoplog-bl-${id}-forward-v4-daddr-reject"
   delete_rule_by_comment forward "zoplog-bl-${id}-forward-v6-saddr-log"
-  delete_rule_by_comment forward "zoplog-bl-${id}-forward-v6-saddr-drop"
+  delete_rule_by_comment forward "zoplog-bl-${id}-forward-v6-saddr-reject"
   delete_rule_by_comment forward "zoplog-bl-${id}-forward-v6-daddr-log"
-  delete_rule_by_comment forward "zoplog-bl-${id}-forward-v6-daddr-drop"
+  delete_rule_by_comment forward "zoplog-bl-${id}-forward-v6-daddr-reject"
 fi
 
 # Auto-save rules after toggling

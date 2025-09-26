@@ -57,7 +57,7 @@ has_rule() {
   /usr/sbin/nft list chain inet "$TABLE" "$chain" 2>/dev/null | grep -Fq "comment \"$comment\""
 }
 
-# Add rules idempotently with comments; LOG before DROP
+# Add rules idempotently with comments; LOG before REJECT
 add_rule_if_missing() {
   local chain="$1"; shift
   local comment="$1"; shift
@@ -68,26 +68,26 @@ add_rule_if_missing() {
 
 # INPUT rules (traffic TO this system from the internet-facing interface)
 add_rule_if_missing input "zoplog-bl-${id}-input-v4-log"  iifname "$FIREWALL_INTERFACE" ip  saddr @"$SET_V4" log prefix "ZOPLOG-BLOCKLIST-IN " level warn
-add_rule_if_missing input "zoplog-bl-${id}-input-v4-drop" iifname "$FIREWALL_INTERFACE" ip  saddr @"$SET_V4" drop
+add_rule_if_missing input "zoplog-bl-${id}-input-v4-reject" iifname "$FIREWALL_INTERFACE" ip  saddr @"$SET_V4" reject
 add_rule_if_missing input "zoplog-bl-${id}-input-v6-log"  iifname "$FIREWALL_INTERFACE" ip6 saddr @"$SET_V6" log prefix "ZOPLOG-BLOCKLIST-IN " level warn
-add_rule_if_missing input "zoplog-bl-${id}-input-v6-drop" iifname "$FIREWALL_INTERFACE" ip6 saddr @"$SET_V6" drop
+add_rule_if_missing input "zoplog-bl-${id}-input-v6-reject" iifname "$FIREWALL_INTERFACE" ip6 saddr @"$SET_V6" reject
 
 # OUTPUT rules (traffic FROM this system to the internet-facing interface)
 add_rule_if_missing output "zoplog-bl-${id}-output-v4-log"  oifname "$FIREWALL_INTERFACE" ip  daddr @"$SET_V4" log prefix "ZOPLOG-BLOCKLIST-OUT " level warn
-add_rule_if_missing output "zoplog-bl-${id}-output-v4-drop" oifname "$FIREWALL_INTERFACE" ip  daddr @"$SET_V4" drop
+add_rule_if_missing output "zoplog-bl-${id}-output-v4-reject" oifname "$FIREWALL_INTERFACE" ip  daddr @"$SET_V4" reject
 add_rule_if_missing output "zoplog-bl-${id}-output-v6-log"  oifname "$FIREWALL_INTERFACE" ip6 daddr @"$SET_V6" log prefix "ZOPLOG-BLOCKLIST-OUT " level warn
-add_rule_if_missing output "zoplog-bl-${id}-output-v6-drop" oifname "$FIREWALL_INTERFACE" ip6 daddr @"$SET_V6" drop
+add_rule_if_missing output "zoplog-bl-${id}-output-v6-reject" oifname "$FIREWALL_INTERFACE" ip6 daddr @"$SET_V6" reject
 
 # FORWARD rules (traffic THROUGH this system via the internet-facing interface)
 # Only block traffic going TO the internet (outbound) or coming FROM the internet (inbound)
 add_rule_if_missing forward "zoplog-bl-${id}-forward-v4-saddr-log"  iifname "$FIREWALL_INTERFACE" ip  saddr @"$SET_V4" log prefix "ZOPLOG-BLOCKLIST-FWD " level warn
-add_rule_if_missing forward "zoplog-bl-${id}-forward-v4-saddr-drop" iifname "$FIREWALL_INTERFACE" ip  saddr @"$SET_V4" drop
+add_rule_if_missing forward "zoplog-bl-${id}-forward-v4-saddr-reject" iifname "$FIREWALL_INTERFACE" ip  saddr @"$SET_V4" reject
 add_rule_if_missing forward "zoplog-bl-${id}-forward-v4-daddr-log"  oifname "$FIREWALL_INTERFACE" ip  daddr @"$SET_V4" log prefix "ZOPLOG-BLOCKLIST-FWD " level warn
-add_rule_if_missing forward "zoplog-bl-${id}-forward-v4-daddr-drop" oifname "$FIREWALL_INTERFACE" ip  daddr @"$SET_V4" drop
+add_rule_if_missing forward "zoplog-bl-${id}-forward-v4-daddr-reject" oifname "$FIREWALL_INTERFACE" ip  daddr @"$SET_V4" reject
 add_rule_if_missing forward "zoplog-bl-${id}-forward-v6-saddr-log"  iifname "$FIREWALL_INTERFACE" ip6 saddr @"$SET_V6" log prefix "ZOPLOG-BLOCKLIST-FWD " level warn
-add_rule_if_missing forward "zoplog-bl-${id}-forward-v6-saddr-drop" iifname "$FIREWALL_INTERFACE" ip6 saddr @"$SET_V6" drop
+add_rule_if_missing forward "zoplog-bl-${id}-forward-v6-saddr-reject" iifname "$FIREWALL_INTERFACE" ip6 saddr @"$SET_V6" reject
 add_rule_if_missing forward "zoplog-bl-${id}-forward-v6-daddr-log"  oifname "$FIREWALL_INTERFACE" ip6 daddr @"$SET_V6" log prefix "ZOPLOG-BLOCKLIST-FWD " level warn
-add_rule_if_missing forward "zoplog-bl-${id}-forward-v6-daddr-drop" oifname "$FIREWALL_INTERFACE" ip6 daddr @"$SET_V6" drop
+add_rule_if_missing forward "zoplog-bl-${id}-forward-v6-daddr-reject" oifname "$FIREWALL_INTERFACE" ip6 daddr @"$SET_V6" reject
 
 # Auto-save rules after applying
 "$(dirname "$0")/zoplog-nft-autosave" post-apply >/dev/null 2>&1 || true

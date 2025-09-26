@@ -27,10 +27,20 @@ delete_rule_by_comment() {
 
 for chain in input output; do
   delete_rule_by_comment "$chain"  "zoplog-bl-${id}-${chain}-v4-log"
-  delete_rule_by_comment "$chain"  "zoplog-bl-${id}-${chain}-v4-drop"
+  delete_rule_by_comment "$chain"  "zoplog-bl-${id}-${chain}-v4-reject"
   delete_rule_by_comment "$chain"  "zoplog-bl-${id}-${chain}-v6-log"
-  delete_rule_by_comment "$chain"  "zoplog-bl-${id}-${chain}-v6-drop"
+  delete_rule_by_comment "$chain"  "zoplog-bl-${id}-${chain}-v6-reject"
 done
+
+# Remove forward rules
+delete_rule_by_comment forward "zoplog-bl-${id}-forward-v4-saddr-log"
+delete_rule_by_comment forward "zoplog-bl-${id}-forward-v4-saddr-reject"
+delete_rule_by_comment forward "zoplog-bl-${id}-forward-v4-daddr-log"
+delete_rule_by_comment forward "zoplog-bl-${id}-forward-v4-daddr-reject"
+delete_rule_by_comment forward "zoplog-bl-${id}-forward-v6-saddr-log"
+delete_rule_by_comment forward "zoplog-bl-${id}-forward-v6-saddr-reject"
+delete_rule_by_comment forward "zoplog-bl-${id}-forward-v6-daddr-log"
+delete_rule_by_comment forward "zoplog-bl-${id}-forward-v6-daddr-reject"
 
 # Destroy sets if present
 nft list set inet "$TABLE" "$SET_V4" >/dev/null 2>&1 && nft delete set inet "$TABLE" "$SET_V4" || true

@@ -55,8 +55,8 @@ if ! rule_exists "output" "${COMMENT_BASE}-output-v4-log"; then
   /usr/sbin/nft add rule inet "$TABLE" output oifname "$FIREWALL_INTERFACE" ip daddr @"$SET_V4" log prefix "ZOPLOG-BLOCKLIST-OUT " level warn comment "${COMMENT_BASE}-output-v4-log"
 fi
 
-if ! rule_exists "output" "${COMMENT_BASE}-output-v4-drop"; then
-  /usr/sbin/nft add rule inet "$TABLE" output oifname "$FIREWALL_INTERFACE" ip daddr @"$SET_V4" drop comment "${COMMENT_BASE}-output-v4-drop"
+if ! rule_exists "output" "${COMMENT_BASE}-output-v4-reject"; then
+  /usr/sbin/nft add rule inet "$TABLE" output oifname "$FIREWALL_INTERFACE" ip daddr @"$SET_V4" reject comment "${COMMENT_BASE}-output-v4-reject"
 fi
 
 # Add FORWARD rules for blocking traffic forwarded through the internet-facing interface
@@ -65,8 +65,8 @@ if ! rule_exists "forward" "${COMMENT_BASE}-forward-v4-log"; then
   /usr/sbin/nft add rule inet "$TABLE" forward oifname "$FIREWALL_INTERFACE" ip daddr @"$SET_V4" log prefix "ZOPLOG-BLOCKLIST-FWD " level warn comment "${COMMENT_BASE}-forward-v4-log"
 fi
 
-if ! rule_exists "forward" "${COMMENT_BASE}-forward-v4-drop"; then
-  /usr/sbin/nft add rule inet "$TABLE" forward oifname "$FIREWALL_INTERFACE" ip daddr @"$SET_V4" drop comment "${COMMENT_BASE}-forward-v4-drop"
+if ! rule_exists "forward" "${COMMENT_BASE}-forward-v4-reject"; then
+  /usr/sbin/nft add rule inet "$TABLE" forward oifname "$FIREWALL_INTERFACE" ip daddr @"$SET_V4" reject comment "${COMMENT_BASE}-forward-v4-reject"
 fi
 
 echo "Firewall rules applied successfully for blocklist $id"
