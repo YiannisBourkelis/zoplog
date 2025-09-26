@@ -76,10 +76,22 @@ def get_wan_ip_id(direction: str, src_ip_id: Optional[int], dst_ip_id: Optional[
     Determine the WAN IP ID based on interface information.
     The monitoring interface is the WAN-facing interface.
     """
-    if phys_iface_in != "monitoring_interface":
+    if direction == "FWD":
+        # Forward chain - check which interface is the WAN interface
+        if phys_iface_in and phys_iface_in != monitoring_interface:
+            return dst_ip_id
+        else:
+            return src_ip_id
+    elif direction == "IN":
+        # Input chain - src_ip is from WAN
+        return src_ip_id
+    elif direction == "OUT":
+        # Output chain - dst_ip is to WAN
         return dst_ip_id
     else:
-        return src_ip_id
+        # Defensive programming - any other direction, assume dst_ip
+        print(f"Other direction: '{direction}', assuming dst_ip is WAN")
+        return dst_ip_id
 
 # Inject a space right after the prefix token if glued (e.g., ...-OUTIN=)
 def _normalize_prefix_spacing(msg: str) -> str:
