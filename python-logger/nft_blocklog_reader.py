@@ -275,6 +275,10 @@ def main():
 
                 direction, fields = parsed
 
+                # Skip ICMP packets as they are usually not relevant for domain blocking
+                if fields.get('PROTO') == 'ICMP':
+                    continue
+
                 # Print summary + raw line for troubleshooting
                 proto = fields.get('PROTO') or ''
                 src = fields.get('SRC') or ''
