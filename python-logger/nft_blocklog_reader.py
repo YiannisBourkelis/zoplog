@@ -141,7 +141,13 @@ def parse_log_line(line: str) -> Optional[Tuple[str, Dict[str, str]]]:
     else:
         return None
     
-    fields = {m.group(1): m.group(2) for m in kv_re.finditer(line)}
+    fields = {}
+    for match in kv_re.finditer(line):
+        key = match.group(1)
+        value = match.group(2)
+        # Only set the field if it hasn't been set before (preserve first occurrence)
+        if key not in fields:
+            fields[key] = value
     return direction, fields
 
 def insert_block_event(conn, cursor, direction: str, fields: Dict[str, str], raw: str):
