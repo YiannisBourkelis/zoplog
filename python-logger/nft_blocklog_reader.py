@@ -242,8 +242,19 @@ def main():
             # Wait for new journal entries
             r.wait()
             
-            # Process all new entries
-            for entry in r:
+            # Get all available entries and process up to 5 most recent to avoid overwhelming slow SD card
+            entries = list(r)
+            total_entries = len(entries)
+            processed_count = 0
+            
+            for entry in entries:
+                if processed_count >= 5:
+                    skipped_count = total_entries - processed_count
+                     # Log skipped events if any
+                    if skipped_count > 0:
+                        print(f"[DEBUG] {skipped_count} events skipped to maintain performance (processing only 5 most recent)", flush=True)
+                    break
+                    
                 msg = entry.get('MESSAGE', '')
                 if not msg:
                     continue
@@ -296,6 +307,8 @@ def main():
                         sys.stderr.write(f"DB error: {e}\n")
                 except Exception as e:
                     sys.stderr.write(f"Unexpected error: {e}\n")
+                
+                processed_count += 1
 
     except KeyboardInterrupt:
         print("Stopping…")
