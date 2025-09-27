@@ -431,12 +431,9 @@ def find_matching_blocklist_domains(host: str, settings: dict):
                 SELECT 1 
                 FROM domain_ip_addresses dia1
                 JOIN domain_ip_addresses dia2 ON dia1.ip_address_id = dia2.ip_address_id
-                JOIN domains d2 ON dia2.domain_id = d2.id
                 WHERE dia1.domain_id = (SELECT id FROM domains WHERE domain = %s)
                 AND dia2.domain_id != dia1.domain_id
                 AND dia2.last_seen >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
-                AND d2.domain LIKE '%%.%%'
-                AND d2.domain NOT REGEXP '^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}(?::[0-9]+)?$|^([0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{1,4}$|^\\[.*\\]$'
                 LIMIT 1
             """, (domain,))
             
