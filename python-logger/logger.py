@@ -376,7 +376,6 @@ def find_matching_blocklist_domains(host: str, settings: dict):
     blocked when processing HTTP/HTTPS traffic.
     
     The function:
-    - Normalizes the hostname (lowercase, remove trailing dots, strip ports)
     - Queries active blocklists for exact domain matches
     - For each matching domain, checks if any other domains sharing its IP addresses
       have been seen in allowed traffic within the last 24 hours
@@ -401,8 +400,7 @@ def find_matching_blocklist_domains(host: str, settings: dict):
         Used by HTTP/HTTPS packet handlers to determine if traffic should be blocked.
         Filters out domains where other domains sharing IPs have recent allowed traffic within last 24 hours.
     """
-    h = _normalize_hostname(host)
-    if not h:
+    if not host:
         return []
     
     try:
@@ -415,7 +413,7 @@ def find_matching_blocklist_domains(host: str, settings: dict):
             "JOIN blocklists bl ON bl.id = bd.blocklist_id "
             "WHERE bl.active = 'active' AND bd.domain = %s"
         )
-        cur.execute(query, (h,))
+        cur.execute(query, (host,))
         rows = cur.fetchall()
         
         if not rows:
@@ -454,7 +452,7 @@ def find_matching_blocklist_domains(host: str, settings: dict):
     except Exception as e:
         log_level = settings.get("log_level", "INFO").upper()
         if log_level in ("DEBUG", "ALL"):
-            print(f"Warning: Blocklist lookup failed for {h}: {e}")
+            print(f"Warning: Blocklist lookup failed for {host}: {e}")
         return []
 
 
