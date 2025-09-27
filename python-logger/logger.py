@@ -104,7 +104,7 @@ _seen_quic_flows = {}   # key: (client_ip, sport, server_ip, dport) -> ts
 def _dns_put(client_ip: str, server_ip: str, host: str):
     if not client_ip or not server_ip or not host:
         return
-    _dns_cache[(client_ip, server_ip)] = {"host": host.lower().rstrip('.'), "ts": time.time()}
+    _dns_cache[(client_ip, server_ip)] = {"host": _normalize_hostname(host), "ts": time.time()}
 
 def _dns_get(client_ip: str, server_ip: str) -> str | None:
     rec = _dns_cache.get((client_ip, server_ip))
@@ -575,6 +575,10 @@ def log_http_request(packet, settings: dict):
     user_agent = http_request.User_Agent.decode() if http_request.User_Agent else None
     accept_language = http_request.Accept_Language.decode() if http_request.Accept_Language else None
 
+    # Normalize hostname to remove port and standardize format
+    if host:
+        host = _normalize_hostname(host)
+
     # Only print if INFO level or higher
     log_level = settings.get("log_level", "INFO").upper()
     if log_level in ("DEBUG", "ALL"):
@@ -715,6 +719,10 @@ def log_https_request(packet, settings: dict, hostname: str | None = None):
     if hostname is None:
         hostname = extract_tls_sni(packet)
 
+    # Normalize hostname to remove port and standardize format
+    if hostname:
+        hostname = _normalize_hostname(hostname)
+
     # Debug logging for SNI extraction issues
     log_level = settings.get("log_level", "INFO").upper()
     if log_level in ("DEBUG", "ALL"):
@@ -753,6 +761,10 @@ def log_https_quic_request(packet, settings: dict, hostname: str | None = None):
                           packet[scapy.UDP].dport if packet.haslayer(scapy.UDP) else None)
     src_mac = packet[scapy.Ether].src if packet.haslayer(scapy.Ether) else None
     dst_mac = packet[scapy.Ether].dst if packet.haslayer(scapy.Ether) else None
+
+    # Normalize hostname to remove port and standardize format
+    if hostname:
+        hostname = _normalize_hostname(hostname)
 
     log_level = settings.get("log_level", "INFO").upper()
     if log_level in ("DEBUG", "ALL"):
