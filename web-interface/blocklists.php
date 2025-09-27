@@ -2,15 +2,33 @@
 // blocklists.php - list and manage blocklists
 require_once __DIR__ . '/zoplog_config.php';
 
-// Fetch blocklists with domain counts
-$res = $mysqli->query("SELECT id, url, description, category, active, created_at, updated_at, type,
-  (SELECT COUNT(*) FROM blocklist_domains bd WHERE bd.blocklist_id = blocklists.id) AS domains_count
-  FROM blocklists
-  ORDER BY CASE WHEN type = 'system' THEN 0 ELSE 1 END, created_at DESC");
-$blocklists = [];
-if ($res) {
-    while ($row = $res->fetch_assoc()) { $blocklists[] = $row; }
+// Handle search functionality
+$search_domain = isset($_GET['search_domain']) ? trim($_GET['search_domain']) : '';
+$filtered_blocklists = [];
+
+// If searching for a domain, find blocklists containing it
+if (!empty($search_domain)) {
+    $search_domain = $mysqli->real_escape_string($search_domain);
+    $res = $mysqli->query("SELECT DISTINCT bl.id, bl.url, bl.description, bl.category, bl.active, bl.created_at, bl.updated_at, bl.type,
+        (SELECT COUNT(*) FROM blocklist_domains bd WHERE bd.blocklist_id = bl.id) AS domains_count
+        FROM blocklists bl
+        JOIN blocklist_domains bd ON bl.id = bd.blocklist_id
+        WHERE bd.domain = '$search_domain'
+        ORDER BY CASE WHEN bl.type = 'system' THEN 0 ELSE 1 END, bl.created_at DESC");
+    if ($res) {
+        while ($row = $res->fetch_assoc()) { $filtered_blocklists[] = $row; }
+    }
+} else {
+    // Fetch all blocklists with domain counts
+    $res = $mysqli->query("SELECT id, url, description, category, active, created_at, updated_at, type,
+        (SELECT COUNT(*) FROM blocklist_domains bd WHERE bd.blocklist_id = blocklists.id) AS domains_count
+        FROM blocklists
+        ORDER BY CASE WHEN type = 'system' THEN 0 ELSE 1 END, created_at DESC");
+    if ($res) {
+        while ($row = $res->fetch_assoc()) { $filtered_blocklists[] = $row; }
+    }
 }
+$blocklists = $filtered_blocklists;
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -34,6 +52,45 @@ if ($res) {
         </svg>
       </span>
       <h1 class="text-2xl font-bold">Block Lists</h1>
+    </div>
+
+    <!-- Search Domain Form -->
+    <div class="bg-white rounded-lg shadow p-6 mb-6">
+      <h2 class="text-lg font-semibold mb-4">Search for Domain in Block Lists</h2>
+      <form method="GET" class="flex gap-4 items-end">
+        <div class="flex-1">
+          <label class="block text-sm font-medium mb-1" for="search_domain">Domain</label>
+          <p class="text-xs text-gray-600 mb-1">Enter a domain to find which blocklists contain it</p>
+          <input id="search_domain" name="search_domain" type="text"
+                 class="w-full border rounded px-3 py-2"
+                 placeholder="example.com"
+                 value="<?= htmlspecialchars($search_domain) ?>"
+                 required>
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="submit" class="bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600 align-bottom">
+            Search
+          </button>
+          <?php if (!empty($search_domain)): ?>
+            <a href="blocklists.php" class="bg-gray-500 text-white px-6 py-2 rounded hover:bg-gray-600 inline-block">
+              Clear Search
+            </a>
+          <?php endif; ?>
+        </div>
+      </form>
+      <?php if (!empty($search_domain)): ?>
+        <div class="mt-4">
+          <?php if (count($blocklists) > 0): ?>
+            <p class="text-green-600 font-medium">
+              Found "<?= htmlspecialchars($search_domain) ?>" in <?= count($blocklists) ?> blocklist(s):
+            </p>
+          <?php else: ?>
+            <p class="text-red-600 font-medium">
+              Domain "<?= htmlspecialchars($search_domain) ?>" was not found in any blocklists.
+            </p>
+          <?php endif; ?>
+        </div>
+      <?php endif; ?>
     </div>
 
     <!-- Add Blocklist Form -->
