@@ -373,14 +373,14 @@ def find_matching_blocklist_domains(host: str, settings: dict):
     The function:
     - Normalizes the hostname (lowercase, remove trailing dots, strip ports)
     - Queries active blocklists for exact domain matches
-    - For each matching domain, checks if its IP addresses have been seen in
-      allowed traffic (packet_logs) within the last 24 hours
-    - Filters out domains whose IPs have recent legitimate traffic to prevent
-      false positives with shared CDN IPs
+    - For each matching domain, checks if any other domains sharing its IP addresses
+      have been seen in allowed traffic within the last 24 hours
+    - Filters out domains where other domains sharing IPs have recent legitimate traffic
+      to prevent false positives with shared CDN IPs
     - Returns blocklist IDs and domain IDs for matched entries that should be blocked
     
     This prevents blocking domains that share IP addresses with CDNs where
-    legitimate traffic has been observed recently.
+    legitimate traffic has been observed to other domains recently.
     
     Args:
         host (str): The hostname/domain to check against blocklists
@@ -389,12 +389,12 @@ def find_matching_blocklist_domains(host: str, settings: dict):
     Returns:
         list[tuple[int, int]]: List of (blocklist_id, blocklist_domain_id) tuples
                                for matching active blocklist entries that should be blocked.
-                               Empty list if no matches, hostname invalid, or IPs have recent allowed traffic.
+                               Empty list if no matches, hostname invalid, or other domains sharing IPs have recent allowed traffic.
                                
     Note:
         Only returns matches from blocklists where active = 'active'.
         Used by HTTP/HTTPS packet handlers to determine if traffic should be blocked.
-        Filters out domains with IPs seen in allowed traffic within last 24 hours.
+        Filters out domains where other domains sharing IPs have recent allowed traffic within last 24 hours.
     """
     h = _normalize_hostname(host)
     if not h:
@@ -416,29 +416,31 @@ def find_matching_blocklist_domains(host: str, settings: dict):
         if not rows:
             return []
         
-        # For each matching domain, check if its IPs have been seen in allowed traffic recently
+        # For each matching domain, check if any other domains sharing its IPs have been seen in allowed traffic recently
+        # This prevents false positives with shared CDN IPs where legitimate traffic exists to other domains
         filtered_results = []
         for blocklist_id, blocklist_domain_id, domain in rows:
-            # Check if any of this domain's IPs have been seen in allowed traffic within last 24 hours
-            # by checking the last_seen field in domain_ip_addresses table
+            # Check if any other domains sharing IPs with this domain have been seen in allowed traffic within last 24 hours
             cur.execute("""
                 SELECT 1 
-                FROM domain_ip_addresses 
-                WHERE domain_id = (SELECT id FROM domains WHERE domain = %s)
-                AND last_seen >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                FROM domain_ip_addresses dia1
+                JOIN domain_ip_addresses dia2 ON dia1.ip_address_id = dia2.ip_address_id
+                WHERE dia1.domain_id = (SELECT id FROM domains WHERE domain = %s)
+                AND dia2.domain_id != dia1.domain_id
+                AND dia2.last_seen >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
                 LIMIT 1
             """, (domain,))
             
             recent_traffic = cur.fetchone()
             
             if recent_traffic:
-                # This domain's IP has been seen in allowed traffic recently, don't block it
+                # Another domain sharing IPs with this blocked domain has been seen in allowed traffic recently, don't block it
                 log_level = settings.get("log_level", "INFO").upper()
                 if log_level in ("DEBUG", "ALL"):
-                    print(f"DEBUG: Skipping block for domain {domain} - IP seen in allowed traffic within 24h")
+                    print(f"DEBUG: Skipping block for domain {domain} - another domain sharing its IP has allowed traffic within 24h")
                 continue
             else:
-                # No recent allowed traffic to this domain's IPs, safe to block
+                # No other domains sharing IPs have recent allowed traffic, safe to block
                 filtered_results.append((blocklist_id, blocklist_domain_id))
         
         return filtered_results
