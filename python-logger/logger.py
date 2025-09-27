@@ -214,7 +214,12 @@ def get_or_insert_domain_with_ip(domain, ip_id):
     """Insert domain with IP relationship or get existing one, updating relationship if needed"""
     if not domain:
         return None
-
+    
+    # Reject IP addresses - domains table should only contain actual domain names
+    import re
+    if re.match(r'^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+.*|^([0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{1,4}.*|^::1.*|^fe80:.*|^fc00:.*|^fd00:.*', domain):
+        return None
+    
     conn, cursor = get_db_connection()
 
     # Insert domain and get ID in one statement (works for both insert and existing)
@@ -421,13 +426,17 @@ def find_matching_blocklist_domains(host: str, settings: dict):
         filtered_results = []
         for blocklist_id, blocklist_domain_id, domain in rows:
             # Check if any other domains sharing IPs with this domain have been seen in allowed traffic within last 24 hours
+            # Exclude IP addresses that may have been incorrectly stored as domain names
             cur.execute("""
                 SELECT 1 
                 FROM domain_ip_addresses dia1
                 JOIN domain_ip_addresses dia2 ON dia1.ip_address_id = dia2.ip_address_id
+                JOIN domains d2 ON dia2.domain_id = d2.id
                 WHERE dia1.domain_id = (SELECT id FROM domains WHERE domain = %s)
                 AND dia2.domain_id != dia1.domain_id
                 AND dia2.last_seen >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                AND d2.domain LIKE '%%.%%'
+                AND d2.domain NOT REGEXP '^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}(?::[0-9]+)?$|^([0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{1,4}$|^\\[.*\\]$'
                 LIMIT 1
             """, (domain,))
             
