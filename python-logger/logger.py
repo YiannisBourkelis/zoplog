@@ -363,22 +363,86 @@ def find_matching_blocklists_for_host(host: str):
 
 
 def find_matching_blocklist_domains(host: str, settings: dict):
-    """Return list of tuples (blocklist_id, blocklist_domain_id) for exact host matches in active blocklists."""
+    """
+    Find all active blocklists that contain an exact match for the given hostname.
+    
+    This function performs a database lookup to identify which active blocklists
+    contain the specified hostname. It's used to determine if a domain should be
+    blocked when processing HTTP/HTTPS traffic.
+    
+    The function:
+    - Normalizes the hostname (lowercase, remove trailing dots, strip ports)
+    - Queries active blocklists for exact domain matches
+    - For each matching domain, checks if its IP addresses have been seen in
+      allowed traffic (packet_logs) within the last 24 hours
+    - Filters out domains whose IPs have recent legitimate traffic to prevent
+      false positives with shared CDN IPs
+    - Returns blocklist IDs and domain IDs for matched entries that should be blocked
+    
+    This prevents blocking domains that share IP addresses with CDNs where
+    legitimate traffic has been observed recently.
+    
+    Args:
+        host (str): The hostname/domain to check against blocklists
+        settings (dict): System settings containing log_level configuration
+        
+    Returns:
+        list[tuple[int, int]]: List of (blocklist_id, blocklist_domain_id) tuples
+                               for matching active blocklist entries that should be blocked.
+                               Empty list if no matches, hostname invalid, or IPs have recent allowed traffic.
+                               
+    Note:
+        Only returns matches from blocklists where active = 'active'.
+        Used by HTTP/HTTPS packet handlers to determine if traffic should be blocked.
+        Filters out domains with IPs seen in allowed traffic within last 24 hours.
+    """
     h = _normalize_hostname(host)
     if not h:
         return []
     
     try:
         conn, cur = get_db_connection()
+        
+        # First, get matching blocklist domains
         query = (
-            "SELECT bd.blocklist_id, bd.id AS blocklist_domain_id "
+            "SELECT bd.blocklist_id, bd.id AS blocklist_domain_id, bd.domain "
             "FROM blocklist_domains bd "
             "JOIN blocklists bl ON bl.id = bd.blocklist_id "
             "WHERE bl.active = 'active' AND bd.domain = %s"
         )
         cur.execute(query, (h,))
         rows = cur.fetchall()
-        return [(row[0], row[1]) for row in rows]
+        
+        if not rows:
+            return []
+        
+        # For each matching domain, check if its IPs have been seen in allowed traffic recently
+        filtered_results = []
+        for blocklist_id, blocklist_domain_id, domain in rows:
+            # Check if any of this domain's IPs have been seen in allowed traffic within last 24 hours
+            # by checking the last_seen field in domain_ip_addresses table
+            cur.execute("""
+                SELECT 1 
+                FROM domain_ip_addresses 
+                WHERE domain_id = (SELECT id FROM domains WHERE domain = %s)
+                AND last_seen >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                LIMIT 1
+            """, (domain,))
+            
+            recent_traffic = cur.fetchone()
+            
+            if recent_traffic:
+                # This domain's IP has been seen in allowed traffic recently, don't block it
+                log_level = settings.get("log_level", "INFO").upper()
+                if log_level in ("DEBUG", "ALL"):
+                    print(f"DEBUG: Skipping block for domain {domain} - IP seen in allowed traffic within 24h")
+                continue
+            else:
+                # No recent allowed traffic to this domain's IPs, safe to block
+                filtered_results.append((blocklist_id, blocklist_domain_id))
+        
+        return filtered_results
+        
     except Exception as e:
         log_level = settings.get("log_level", "INFO").upper()
         if log_level in ("DEBUG", "ALL"):
@@ -836,6 +900,14 @@ def main():
     
     interface = get_default_interface()
     print(f"Monitoring HTTP/HTTPS traffic on {interface}...")
+    
+    # Display current git commit for version tracking
+    try:
+        git_commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=os.path.dirname(__file__)).decode('utf-8').strip()
+        print(f"Git commit: {git_commit}", flush=True)
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        print("Git commit: unknown (not in git repository or git not available)", flush=True)
+    
     print("Time\tSource\tDestination\tType\tMethod/Host")
 
     # Create a packet handler that captures the settings
